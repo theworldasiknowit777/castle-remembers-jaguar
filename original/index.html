@@ -1,0 +1,3639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>The Castle Remembers</title>
+<style>
+  :root { --bg: #000000; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #000000; } }
+  :root[data-theme="dark"] { --bg: #000000; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center;
+         touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  canvas { display: block; touch-action: none; image-rendering: pixelated; background: #0b0910; }
+</style>
+</head>
+<body>
+<canvas id="game" width="720" height="1280"></canvas>
+<script>
+// THE CASTLE REMEMBERS — shared constants
+(function (CR) {
+  'use strict';
+  const C = {
+    W: 720, H: 1280,
+    VIEW_H: 1000,          // game viewport height (top of canvas)
+    CTRL_H: 280,           // touch control panel height (bottom of canvas)
+    FLOORS: 5,
+    FLOOR_GAP: 320,
+    WORLD_H: 1580,
+    WALL_L: 24, WALL_R: 696,
+
+    GRAVITY: 1900, JUMP_V: 640,
+    MOVE_SPEED: 230, CLIMB_SPEED: 170,
+    PLAYER_W: 26, PLAYER_H: 44,
+
+    GUARD_W: 30, GUARD_H: 46, GUARD_SPEED: 70,
+    DOOR_W: 14, DOOR_H: 130,
+    INTERACT_R: 46,
+    SHOVE_R: 58,
+
+    STORAGE_KEY: 'castle-remembers-v1',
+    FORGET: { x: 210, y: 1150, w: 300, h: 70 },
+    DEBUG_BTN: { x: 634, y: 60, w: 74, h: 30 },
+
+    // Reconstruction transition timeline (seconds)
+    REBUILD: { reconAt: 1.7, assembleAt: 2.4, total: 3.7, skipAfter: 0.8 }
+  };
+  C.floorY = i => C.WORLD_H - 40 - i * C.FLOOR_GAP; // floor surface y (feet level)
+  CR.C = C;
+})(window.CR = window.CR || {});
+
+
+// js/sounds.js — procedural audio for THE CASTLE REMEMBERS.
+// Everything is synthesized with the Web Audio API at runtime: no audio files, nothing to load.
+//
+//   CR.Sound.play('lever');            // one-shot effect (see SFX table below)
+//   CR.Sound.play('step', { rate: 1.1 });
+//   CR.Sound.ambient(true);            // wind + torch crackle bed
+//   CR.Sound.music.start({ intensity: 0.4, seed: 3 });   // procedural D-Phrygian loop
+//   CR.Sound.music.setIntensity(0.8);  // more drum / more notes (e.g. by tier pressure)
+//   CR.Sound.music.stop();
+//   CR.Sound.toggle();                 // mute / unmute (persisted in localStorage)
+//   CR.Sound.loadMusic('music/theme.ogg') // optional: use a real track instead of the generator
+//
+// Browsers only allow audio after a user gesture; this module unlocks itself on the first
+// pointer/touch/key event, so calling play() early is harmless (it just stays silent).
+(function (CR) {
+  'use strict';
+
+  const STORE_KEY = 'castle-remembers-sound';
+
+  let ctx = null, master = null, sfxBus = null, musBus = null, ambBus = null;
+  let noiseBuf = null;
+  let enabled = true;
+  try { enabled = localStorage.getItem(STORE_KEY) !== '0'; } catch (e) { /* private mode */ }
+  let volume = 0.8;
+  let unlocked = false;
+  const lastAt = Object.create(null);   // per-effect throttle
+  let wantAmbient = false, wantMusic = null;
+
+  // ---------------------------------------------------------------- context
+  function ensure() {
+    if (ctx) return ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { ctx = new AC(); } catch (e) { return null; }
+    master = ctx.createGain();
+    master.gain.value = enabled ? volume : 0;
+    master.connect(ctx.destination);
+    sfxBus = ctx.createGain(); sfxBus.gain.value = 1.0;  sfxBus.connect(master);
+    musBus = ctx.createGain(); musBus.gain.value = 0.55; musBus.connect(master);
+    ambBus = ctx.createGain(); ambBus.gain.value = 0.7;  ambBus.connect(master);
+    // one shared 2 s white-noise buffer, reused by every noise-based effect
+    const len = Math.floor(ctx.sampleRate * 2);
+    noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return ctx;
+  }
+
+  function unlock() {
+    const c = ensure();
+    if (!c) return;
+    if (c.state === 'suspended') { try { c.resume(); } catch (e) { /* ignore */ } }
+    if (!unlocked) {
+      unlocked = true;
+      // things requested before the first gesture start now
+      if (wantAmbient) ambientStart();
+      if (wantMusic) music.start(wantMusic);
+    }
+  }
+  ['pointerdown', 'touchstart', 'mousedown', 'keydown'].forEach(ev =>
+    window.addEventListener(ev, unlock, { passive: true }));
+
+  // pause everything while the tab is hidden (saves battery, avoids ghost audio)
+  document.addEventListener('visibilitychange', () => {
+    if (!ctx) return;
+    if (document.hidden) { try { ctx.suspend(); } catch (e) { /* ignore */ } }
+    else if (unlocked && enabled) { try { ctx.resume(); } catch (e) { /* ignore */ } }
+  });
+
+  function now() { return ctx.currentTime; }
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  // ---------------------------------------------------------------- primitives
+  // gain envelope: attack a → hold s → exponential decay d
+  function env(g, t, vol, a, d, s) {
+    const p = g.gain;
+    p.cancelScheduledValues(t);
+    p.setValueAtTime(0.0001, t);
+    p.linearRampToValueAtTime(Math.max(0.0002, vol), t + a);
+    if (s) p.setValueAtTime(Math.max(0.0002, vol), t + a + s);
+    p.exponentialRampToValueAtTime(0.0001, t + a + (s || 0) + d);
+  }
+
+  function filterChain(node, o, t, dur) {
+    if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass';  f.frequency.setValueAtTime(o.lp, t);
+      if (o.lp1) f.frequency.exponentialRampToValueAtTime(o.lp1, t + dur); if (o.q) f.Q.value = o.q; node.connect(f); node = f; }
+    if (o.hp) { const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.setValueAtTime(o.hp, t);
+      if (o.hp1) f.frequency.exponentialRampToValueAtTime(o.hp1, t + dur); node.connect(f); node = f; }
+    if (o.bp) { const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.setValueAtTime(o.bp, t);
+      if (o.bp1) f.frequency.exponentialRampToValueAtTime(o.bp1, t + dur); f.Q.value = o.q || 1.2; node.connect(f); node = f; }
+    return node;
+  }
+
+  // oscillator voice. o: {type,f0,f1,dur,vol,a,d,s,at,bus,lp,lp1,hp,bp,q,detune,slide}
+  function tone(o) {
+    const t = now() + (o.at || 0);
+    const dur = o.dur || 0.2;
+    const osc = ctx.createOscillator();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(Math.max(1, o.f0), t);
+    if (o.f1 && o.f1 !== o.f0) {
+      if (o.slide === 'lin') osc.frequency.linearRampToValueAtTime(Math.max(1, o.f1), t + dur);
+      else osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.f1), t + dur);
+    }
+    if (o.detune) osc.detune.value = o.detune;
+    const a = o.a != null ? o.a : 0.005, d = o.d != null ? o.d : dur, s = o.s || 0;
+    const g = ctx.createGain();
+    env(g, t, o.vol != null ? o.vol : 0.2, a, d, s);
+    const node = filterChain(osc, o, t, dur);
+    node.connect(g);
+    g.connect(o.bus || sfxBus);
+    osc.start(t);
+    osc.stop(t + a + s + d + 0.05);
+    return osc;
+  }
+
+  // noise voice. o: {dur,vol,a,d,s,at,bus,lp,lp1,hp,hp1,bp,bp1,q,rate}
+  function noise(o) {
+    const t = now() + (o.at || 0);
+    const dur = o.dur || 0.1;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf; src.loop = true;
+    if (o.rate) src.playbackRate.value = o.rate;
+    const a = o.a != null ? o.a : 0.003, d = o.d != null ? o.d : dur, s = o.s || 0;
+    const g = ctx.createGain();
+    env(g, t, o.vol != null ? o.vol : 0.2, a, d, s);
+    const node = filterChain(src, o, t, dur);
+    node.connect(g);
+    g.connect(o.bus || sfxBus);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + a + s + d + 0.05);
+    return src;
+  }
+
+  // ---------------------------------------------------------------- SFX table
+  // Each recipe receives (p) = user opts merged with defaults: p.rate scales pitch, p.vol scales volume.
+  const SFX = {
+    // --- movement
+    step(p) {   // boot on stone
+      noise({ dur: 0.045, vol: 0.16 * p.vol, lp: 900 * p.rate, lp1: 300, rate: rnd(0.9, 1.1) });
+      tone({ type: 'sine', f0: 95 * p.rate, f1: 60, dur: 0.05, vol: 0.10 * p.vol });
+    },
+    climb(p) {  // wooden rung creak
+      tone({ type: 'triangle', f0: 190 * p.rate, f1: 150, dur: 0.07, vol: 0.09 * p.vol, lp: 1400 });
+      noise({ dur: 0.04, vol: 0.06 * p.vol, bp: 1200, q: 2 });
+    },
+    jump(p) {
+      tone({ type: 'sine', f0: 200 * p.rate, f1: 420 * p.rate, dur: 0.12, vol: 0.13 * p.vol });
+      noise({ dur: 0.05, vol: 0.05 * p.vol, hp: 2000 });
+    },
+    land(p) {
+      noise({ dur: 0.08, vol: 0.22 * p.vol, lp: 500 });
+      tone({ type: 'sine', f0: 110 * p.rate, f1: 50, dur: 0.1, vol: 0.2 * p.vol });
+    },
+
+    // --- interactables
+    lever(p) {  // iron lever: scrape, throw, clack
+      noise({ dur: 0.14, vol: 0.10 * p.vol, bp: 1800, bp1: 900, q: 3 });
+      tone({ type: 'square', f0: 320 * p.rate, f1: 130, dur: 0.16, vol: 0.06 * p.vol, lp: 1200 });
+      tone({ type: 'square', f0: 1400 * p.rate, f1: 900, dur: 0.03, vol: 0.10 * p.vol, at: 0.15 });
+      tone({ type: 'sine', f0: 90, f1: 55, dur: 0.12, vol: 0.18 * p.vol, at: 0.15 });
+    },
+    leverDud(p) { // lever that does nothing: limp clunk
+      tone({ type: 'square', f0: 240 * p.rate, f1: 160, dur: 0.08, vol: 0.05 * p.vol, lp: 900 });
+      tone({ type: 'sine', f0: 70, f1: 50, dur: 0.1, vol: 0.14 * p.vol, at: 0.07 });
+    },
+    leverTrap(p) { // lever + spring release
+      SFX.lever(p);
+      tone({ type: 'sawtooth', f0: 900 * p.rate, f1: 180, dur: 0.28, vol: 0.14 * p.vol, at: 0.18, lp: 3000 });
+      noise({ dur: 0.22, vol: 0.14 * p.vol, hp: 2500, at: 0.18 });
+    },
+    door(p) {   // oak door creaks open, settles
+      tone({ type: 'sawtooth', f0: 85 * p.rate, f1: 140 * p.rate, dur: 0.45, vol: 0.07 * p.vol, lp: 700, a: 0.03 });
+      noise({ dur: 0.4, vol: 0.05 * p.vol, bp: 600, bp1: 1400, q: 4, a: 0.02 });
+      tone({ type: 'sine', f0: 75, f1: 45, dur: 0.14, vol: 0.16 * p.vol, at: 0.42 });
+    },
+    doorLocked(p) { // bricked / barred: dull thud
+      noise({ dur: 0.09, vol: 0.18 * p.vol, lp: 420 });
+      tone({ type: 'sine', f0: 85 * p.rate, f1: 45, dur: 0.16, vol: 0.28 * p.vol });
+      tone({ type: 'triangle', f0: 170 * p.rate, f1: 120, dur: 0.06, vol: 0.06 * p.vol });
+    },
+    chest(p) {  // lid creak then a soft glint
+      tone({ type: 'sawtooth', f0: 160 * p.rate, f1: 240 * p.rate, dur: 0.18, vol: 0.05 * p.vol, lp: 900 });
+      noise({ dur: 0.1, vol: 0.05 * p.vol, bp: 900, q: 3 });
+      [659, 880, 1319].forEach((f, i) =>
+        tone({ type: 'sine', f0: f * p.rate, dur: 0.22, vol: 0.10 * p.vol, at: 0.16 + i * 0.07 }));
+    },
+    shard(p) {  // memory shard: crystalline sparkle
+      [1568, 1976, 2637, 3136].forEach((f, i) =>
+        tone({ type: 'sine', f0: f * p.rate, f1: f * p.rate * 1.01, dur: 0.28, vol: 0.09 * p.vol, at: i * 0.045 }));
+      tone({ type: 'triangle', f0: 784 * p.rate, dur: 0.35, vol: 0.05 * p.vol, at: 0.05 });
+    },
+    trapWarn(p) { // the 0.55 s tell before a chest erupts: three ticks
+      [0, 0.16, 0.32].forEach(at =>
+        tone({ type: 'square', f0: 1800 * p.rate, f1: 1500, dur: 0.025, vol: 0.09 * p.vol, at, lp: 4000 }));
+      noise({ dur: 0.45, vol: 0.04 * p.vol, bp: 3000, q: 6, a: 0.1 });
+    },
+    spikes(p) { // spike eruption / spikes shooting up
+      noise({ dur: 0.18, vol: 0.28 * p.vol, hp: 2200, hp1: 900 });
+      tone({ type: 'sawtooth', f0: 420 * p.rate, f1: 90, dur: 0.2, vol: 0.14 * p.vol, lp: 2500 });
+      tone({ type: 'sine', f0: 2400 * p.rate, f1: 2300, dur: 0.3, vol: 0.05 * p.vol, at: 0.02 });
+    },
+    spikesDown(p) { // retracting spikes slide back
+      noise({ dur: 0.14, vol: 0.10 * p.vol, bp: 1500, bp1: 500, q: 2 });
+      tone({ type: 'triangle', f0: 380 * p.rate, f1: 180, dur: 0.14, vol: 0.05 * p.vol });
+    },
+    gateOpen(p) { // portcullis: chain rattle + rumble
+      for (let i = 0; i < 7; i++) noise({ dur: 0.02, vol: 0.09 * p.vol, hp: 2200, at: i * 0.055 + rnd(0, 0.012) });
+      noise({ dur: 0.5, vol: 0.10 * p.vol, lp: 220, a: 0.05 });
+      tone({ type: 'sine', f0: 60, f1: 48, dur: 0.5, vol: 0.10 * p.vol });
+    },
+    gateClose(p) { // iron slams down
+      noise({ dur: 0.16, vol: 0.30 * p.vol, lp: 320 });
+      tone({ type: 'sine', f0: 70 * p.rate, f1: 40, dur: 0.24, vol: 0.30 * p.vol });
+      tone({ type: 'triangle', f0: 880 * p.rate, f1: 860, dur: 0.45, vol: 0.05 * p.vol, at: 0.01 });
+      tone({ type: 'triangle', f0: 1320 * p.rate, f1: 1290, dur: 0.35, vol: 0.03 * p.vol, at: 0.01 });
+    },
+    alarm(p) {  // alarm bell (T3 lever): two strikes
+      [0, 0.45].forEach(at => {
+        tone({ type: 'sine', f0: 880 * p.rate, f1: 870, dur: 0.8, vol: 0.13 * p.vol, at });
+        tone({ type: 'sine', f0: 1320 * p.rate, f1: 1305, dur: 0.6, vol: 0.07 * p.vol, at });
+        tone({ type: 'sine', f0: 2010 * p.rate, f1: 1990, dur: 0.4, vol: 0.04 * p.vol, at });
+        noise({ dur: 0.02, vol: 0.10 * p.vol, hp: 3000, at });
+      });
+    },
+
+    // --- combat & danger
+    hit(p) {    // player takes a blow
+      noise({ dur: 0.12, vol: 0.32 * p.vol, lp: 700 });
+      tone({ type: 'sine', f0: 160 * p.rate, f1: 40, dur: 0.26, vol: 0.32 * p.vol });
+      tone({ type: 'square', f0: 900 * p.rate, f1: 300, dur: 0.05, vol: 0.06 * p.vol, lp: 2000 });
+    },
+    death(p) {  // one hit ends the run: blow + long fall
+      SFX.hit(p);
+      tone({ type: 'sawtooth', f0: 300 * p.rate, f1: 55, dur: 0.7, vol: 0.12 * p.vol, at: 0.08, lp: 900 });
+      tone({ type: 'sine', f0: 55, f1: 30, dur: 0.9, vol: 0.22 * p.vol, at: 0.1 });
+      noise({ dur: 0.6, vol: 0.08 * p.vol, lp: 300, at: 0.1, a: 0.05 });
+    },
+    shove(p) {  // player shoves a guard: whoosh + armored thud
+      noise({ dur: 0.14, vol: 0.14 * p.vol, bp: 900, bp1: 250, q: 1.5 });
+      noise({ dur: 0.1, vol: 0.18 * p.vol, lp: 600, at: 0.09 });
+      tone({ type: 'sine', f0: 120 * p.rate, f1: 45, dur: 0.18, vol: 0.24 * p.vol, at: 0.09 });
+      tone({ type: 'triangle', f0: 700 * p.rate, f1: 500, dur: 0.12, vol: 0.05 * p.vol, at: 0.1 });
+    },
+    shoveArmor(p) { // heavy: metal clang, he doesn't go down yet
+      SFX.shove(p);
+      tone({ type: 'square', f0: 1100 * p.rate, f1: 1050, dur: 0.3, vol: 0.06 * p.vol, at: 0.1, lp: 3000 });
+      tone({ type: 'square', f0: 1650 * p.rate, f1: 1600, dur: 0.2, vol: 0.03 * p.vol, at: 0.1, lp: 3500 });
+    },
+    guardAlert(p) { // a guard notices you: short horn
+      tone({ type: 'square', f0: 392 * p.rate, dur: 0.14, vol: 0.06 * p.vol, lp: 1500, a: 0.01 });
+      tone({ type: 'square', f0: 523 * p.rate, dur: 0.22, vol: 0.06 * p.vol, lp: 1500, at: 0.14, a: 0.01 });
+      noise({ dur: 0.3, vol: 0.02 * p.vol, bp: 1000, q: 2, a: 0.02 });
+    },
+    arrow(p) {  // bowstring twang + shaft whoosh
+      tone({ type: 'triangle', f0: 240 * p.rate, f1: 160, dur: 0.06, vol: 0.14 * p.vol });
+      noise({ dur: 0.28, vol: 0.14 * p.vol, hp: 1400, hp1: 3500, a: 0.01 });
+    },
+    arrowHitWall(p) {
+      noise({ dur: 0.05, vol: 0.14 * p.vol, hp: 1500 });
+      tone({ type: 'triangle', f0: 600 * p.rate, f1: 300, dur: 0.07, vol: 0.08 * p.vol });
+    },
+
+    // --- shard-heart (the one-use second chance)
+    heartGain(p) { // shard becomes a heart: two thumps + shimmer
+      tone({ type: 'sine', f0: 70, f1: 50, dur: 0.12, vol: 0.26 * p.vol });
+      tone({ type: 'sine', f0: 70, f1: 50, dur: 0.14, vol: 0.20 * p.vol, at: 0.17 });
+      [1047, 1319, 1568].forEach((f, i) =>
+        tone({ type: 'sine', f0: f * p.rate, dur: 0.4, vol: 0.05 * p.vol, at: 0.3 + i * 0.06 }));
+    },
+    heartSave(p) { // the shard-heart shatters and absorbs the hit
+      noise({ dur: 0.28, vol: 0.28 * p.vol, hp: 2800, hp1: 6000 });
+      [2637, 2093, 1568, 1175].forEach((f, i) =>
+        tone({ type: 'sine', f0: f * p.rate, f1: f * p.rate * 0.97, dur: 0.3, vol: 0.09 * p.vol, at: i * 0.05 }));
+      tone({ type: 'sine', f0: 60, f1: 40, dur: 0.3, vol: 0.2 * p.vol });
+      tone({ type: 'triangle', f0: 523 * p.rate, dur: 0.6, vol: 0.05 * p.vol, at: 0.2 });
+    },
+    heartbeat(p) { // low-key pulse while a shard-heart is active
+      tone({ type: 'sine', f0: 62, f1: 48, dur: 0.1, vol: 0.14 * p.vol });
+      tone({ type: 'sine', f0: 62, f1: 48, dur: 0.12, vol: 0.10 * p.vol, at: 0.16 });
+    },
+
+    // --- flow / UI
+    uiConfirm(p) {
+      tone({ type: 'sine', f0: 660 * p.rate, dur: 0.06, vol: 0.10 * p.vol });
+      tone({ type: 'sine', f0: 990 * p.rate, dur: 0.1, vol: 0.10 * p.vol, at: 0.06 });
+    },
+    uiMove(p) { tone({ type: 'sine', f0: 440 * p.rate, dur: 0.035, vol: 0.06 * p.vol }); },
+    runStart(p) { // drum + rising horn
+      tone({ type: 'sine', f0: 110, f1: 45, dur: 0.3, vol: 0.28 * p.vol });
+      noise({ dur: 0.08, vol: 0.10 * p.vol, lp: 900 });
+      tone({ type: 'square', f0: 294 * p.rate, f1: 587 * p.rate, dur: 0.5, vol: 0.05 * p.vol, at: 0.05, lp: 1800, a: 0.05 });
+    },
+    floorUp(p) { // reached a new floor: two rising bells
+      tone({ type: 'sine', f0: 523 * p.rate, dur: 0.25, vol: 0.07 * p.vol });
+      tone({ type: 'sine', f0: 784 * p.rate, dur: 0.35, vol: 0.07 * p.vol, at: 0.12 });
+    },
+    escape(p) { // through the great arch: fanfare in D Dorian
+      const seq = [293.66, 349.23, 440.00, 587.33];
+      seq.forEach((f, i) => {
+        tone({ type: 'triangle', f0: f * p.rate, dur: 0.45, vol: 0.12 * p.vol, at: i * 0.16, lp: 2500 });
+        tone({ type: 'sine', f0: f * p.rate / 2, dur: 0.45, vol: 0.06 * p.vol, at: i * 0.16 });
+      });
+      [293.66, 440.00, 587.33, 880.00].forEach(f =>
+        tone({ type: 'triangle', f0: f * p.rate, dur: 1.8, vol: 0.05 * p.vol, at: 0.66, a: 0.05, lp: 2200 }));
+      noise({ dur: 1.6, vol: 0.05 * p.vol, lp: 900, lp1: 200, a: 0.3, at: 0.6 }); // wind on the battlements
+    },
+    remember(p) { // "THE CASTLE OBSERVED YOU": low dissonant swell
+      tone({ type: 'sine', f0: 55, dur: 2.2, vol: 0.20 * p.vol, a: 0.6, d: 1.6 });
+      tone({ type: 'triangle', f0: 110, detune: -12, dur: 2.2, vol: 0.06 * p.vol, a: 0.7, d: 1.5, lp: 600 });
+      tone({ type: 'triangle', f0: 116.5, detune: 8, dur: 2.0, vol: 0.05 * p.vol, a: 0.9, d: 1.1, lp: 600 }); // minor second rub
+      noise({ dur: 2.0, vol: 0.05 * p.vol, lp: 380, lp1: 120, a: 0.8, d: 1.2 });
+      tone({ type: 'sine', f0: 1760 * p.rate, f1: 1740, dur: 1.4, vol: 0.025 * p.vol, at: 0.9, a: 0.02 }); // a distant chime
+    },
+    rebuild(p) { // "RECONSTRUCTING...": stone grinding into place
+      noise({ dur: 1.6, vol: 0.22 * p.vol, lp: 140, a: 0.08, d: 1.5 });
+      noise({ dur: 1.4, vol: 0.06 * p.vol, bp: 700, bp1: 300, q: 1, a: 0.1, d: 1.3 });
+      for (let i = 0; i < 9; i++) { // stone blocks clacking down
+        const at = 0.15 + i * rnd(0.11, 0.17);
+        noise({ dur: 0.03, vol: 0.12 * p.vol, lp: 1500, at });
+        tone({ type: 'sine', f0: rnd(90, 140), f1: 50, dur: 0.1, vol: 0.14 * p.vol, at });
+      }
+    }
+  };
+  // minimum spacing between repeats of the same effect (seconds)
+  const THROTTLE = { step: 0.09, climb: 0.13, spikes: 0.12, spikesDown: 0.12, arrow: 0.05,
+    hit: 0.1, guardAlert: 0.5, heartbeat: 0.5, uiMove: 0.03, shard: 0.05, trapWarn: 0.5 };
+
+  function play(name, opts) {
+    if (!enabled) return false;
+    const fn = SFX[name];
+    if (!fn) { if (window.console) console.warn('[sound] unknown effect', name); return false; }
+    if (!ensure()) return false;
+    const t = ctx.currentTime;
+    const gap = THROTTLE[name] || 0.02;
+    if (lastAt[name] != null && t - lastAt[name] < gap) return false;
+    lastAt[name] = t;
+    const p = Object.assign({ rate: 1, vol: 1 }, opts || {});
+    if (p.jitter) p.rate *= rnd(1 - p.jitter, 1 + p.jitter);
+    try { fn(p); } catch (e) { if (window.console) console.warn('[sound]', name, e); return false; }
+    return true;
+  }
+
+  // briefly lower the music so a sting can be heard
+  function duck(seconds, depth) {
+    if (!ctx) return;
+    const t = ctx.currentTime, base = 0.55, low = base * (depth == null ? 0.35 : depth);
+    const g = musBus.gain;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.linearRampToValueAtTime(low, t + 0.05);
+    g.setValueAtTime(low, t + (seconds || 1));
+    g.linearRampToValueAtTime(base, t + (seconds || 1) + 0.6);
+  }
+
+  // ---------------------------------------------------------------- ambient bed
+  let amb = null;
+  function ambientStart() {
+    if (amb || !ensure() || !unlocked || !enabled) return;
+    const t = now();
+    // wind: looping noise → lowpass (slowly wandering) → gain (slowly breathing)
+    const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true; src.playbackRate.value = 0.6;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 340; lp.Q.value = 0.7;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.05, t + 2.5);
+    const lfo1 = ctx.createOscillator(); lfo1.frequency.value = 0.07;
+    const lfo1g = ctx.createGain(); lfo1g.gain.value = 140; lfo1.connect(lfo1g); lfo1g.connect(lp.frequency);
+    const lfo2 = ctx.createOscillator(); lfo2.frequency.value = 0.11;
+    const lfo2g = ctx.createGain(); lfo2g.gain.value = 0.018; lfo2.connect(lfo2g); lfo2g.connect(g.gain);
+    src.connect(lp); lp.connect(g); g.connect(ambBus);
+    src.start(t); lfo1.start(t); lfo2.start(t);
+    // torch crackle: sparse random ticks
+    let timer = null, alive = true;
+    const crackle = () => {
+      if (!alive) return;
+      if (ctx.state === 'running') {
+        const n = Math.random() < 0.3 ? 2 : 1;
+        for (let i = 0; i < n; i++)
+          noise({ dur: rnd(0.012, 0.04), vol: rnd(0.02, 0.05), bp: rnd(1800, 3400), q: 3, bus: ambBus, at: i * 0.04 });
+      }
+      timer = setTimeout(crackle, rnd(140, 650));
+    };
+    timer = setTimeout(crackle, 400);
+    amb = { stop() { alive = false; clearTimeout(timer);
+      const tt = now(); g.gain.cancelScheduledValues(tt); g.gain.setValueAtTime(g.gain.value, tt);
+      g.gain.linearRampToValueAtTime(0.0001, tt + 0.8);
+      setTimeout(() => { try { src.stop(); lfo1.stop(); lfo2.stop(); } catch (e) { /* ignore */ } }, 900); } };
+  }
+  function ambient(on) {
+    wantAmbient = !!on;
+    if (on) ambientStart();
+    else if (amb) { amb.stop(); amb = null; }
+  }
+
+  // ---------------------------------------------------------------- music
+  // A sparse procedural loop: drone in D, plucked phrases in D Phrygian (the "Andalusian"
+  // flavour fits an Iberian fortress), a frame-drum pulse whose density follows `intensity`.
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const SCALE = [146.83, 155.56, 174.61, 196.00, 220.00, 233.08, 261.63, 293.66, 311.13, 349.23, 392.00]; // D3 Phrygian…
+  const PHRASES = [ // 16 eighth-notes each; index into SCALE, -1 = rest
+    [0, -1, 2, -1, 1, -1, 0, -1, 4, -1, 3, -1, 2, -1, 1, -1],
+    [0, -1, -1, 4, -1, 3, -1, -1, 2, -1, 1, -1, 0, -1, -1, -1],
+    [7, -1, 6, -1, 5, -1, 4, -1, 3, -1, 2, -1, 1, -1, 0, -1],
+    [0, -1, -1, -1, 2, -1, -1, -1, 1, -1, -1, -1, 0, -1, -1, -1],
+    [4, -1, 5, -1, 4, -1, 2, -1, 1, -1, 0, -1, 1, -1, -1, -1],
+    [-1, -1, -1, -1, 7, -1, 8, -1, 7, -1, 4, -1, 2, -1, 1, -1]
+  ];
+  const music = (function () {
+    let timer = null, nextT = 0, step = 0, rng = null, phrase = PHRASES[0], intensity = 0.3;
+    let drone = null, track = null, trackSrc = null;
+    const bpm = 72;
+    let playing = false;
+
+    function droneStart() {
+      const t = now();
+      const o1 = ctx.createOscillator(); o1.type = 'sine'; o1.frequency.value = 73.42;         // D2
+      const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = 146.83; o2.detune.value = 6;
+      const o3 = ctx.createOscillator(); o3.type = 'triangle'; o3.frequency.value = 220.0; o3.detune.value = -5; // A3, a fifth
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.09, t + 3);
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.05;
+      const lfog = ctx.createGain(); lfog.gain.value = 0.025; lfo.connect(lfog); lfog.connect(g.gain);
+      const g3 = ctx.createGain(); g3.gain.value = 0.35;
+      o1.connect(lp); o2.connect(lp); o3.connect(g3); g3.connect(lp); lp.connect(g); g.connect(musBus);
+      o1.start(t); o2.start(t); o3.start(t); lfo.start(t);
+      return { stop() { const tt = now(); g.gain.cancelScheduledValues(tt); g.gain.setValueAtTime(g.gain.value, tt);
+        g.gain.linearRampToValueAtTime(0.0001, tt + 1.2);
+        setTimeout(() => { try { o1.stop(); o2.stop(); o3.stop(); lfo.stop(); } catch (e) { /* ignore */ } }, 1300); } };
+    }
+
+    function scheduleStep(i, t) {
+      const beat = i % 16;            // position inside the 2-bar phrase
+      if (beat === 0) phrase = PHRASES[Math.floor(rng() * PHRASES.length)];
+      const at = t - now();
+      // frame drum
+      if (beat === 0 || beat === 8) tone({ type: 'sine', f0: 105, f1: 48, dur: 0.2, vol: 0.20, at, bus: musBus });
+      else if ((beat === 6 || beat === 14) && intensity > 0.45) tone({ type: 'sine', f0: 95, f1: 45, dur: 0.15, vol: 0.14, at, bus: musBus });
+      else if ((beat === 3 || beat === 11) && intensity > 0.75) tone({ type: 'sine', f0: 115, f1: 50, dur: 0.12, vol: 0.12, at, bus: musBus });
+      // tambourine tick on off-beats
+      if (beat % 2 === 1 && intensity > 0.3 && rng() < 0.4 + intensity * 0.4)
+        noise({ dur: 0.03, vol: 0.035 + intensity * 0.02, hp: 6000, at, bus: musBus });
+      // pluck
+      const n = phrase[beat];
+      if (n >= 0 && rng() < 0.55 + intensity * 0.45) {
+        const f = SCALE[n];
+        tone({ type: 'triangle', f0: f, dur: 0.38, vol: 0.085, a: 0.004, lp: 1900, at, bus: musBus });
+        tone({ type: 'sine', f0: f / 2, dur: 0.3, vol: 0.04, at, bus: musBus });
+        if (intensity > 0.6 && rng() < 0.3) // grace note a step above, late
+          tone({ type: 'triangle', f0: SCALE[Math.min(SCALE.length - 1, n + 1)], dur: 0.16, vol: 0.05, lp: 1900, at: at + 0.21, bus: musBus });
+      }
+    }
+
+    function tick() {
+      if (!ctx || ctx.state !== 'running') return;
+      const horizon = now() + 0.15;
+      while (nextT < horizon) {
+        if (nextT < now() - 0.5) nextT = now() + 0.02;   // fell behind (tab hidden): jump forward
+        scheduleStep(step, nextT);
+        step++;
+        nextT += 60 / bpm / 2;   // eighth notes
+      }
+    }
+
+    function start(opts) {
+      opts = opts || {};
+      wantMusic = opts;
+      if (opts.intensity != null) intensity = Math.max(0, Math.min(1, opts.intensity));
+      if (!ensure() || !unlocked || !enabled) return;   // will start on unlock
+      if (playing) return;
+      playing = true;
+      if (track) { // a loaded audio track wins over the generator
+        trackSrc = ctx.createBufferSource(); trackSrc.buffer = track; trackSrc.loop = true;
+        trackSrc.connect(musBus); trackSrc.start();
+        return;
+      }
+      rng = mulberry32((opts.seed || 1) * 7919 + 17);
+      step = 0; nextT = now() + 0.1;
+      drone = droneStart();
+      timer = setInterval(tick, 40);
+    }
+    function stop(fade) {
+      wantMusic = null;
+      if (!playing) return;
+      playing = false;
+      clearInterval(timer); timer = null;
+      if (drone) { drone.stop(); drone = null; }
+      if (trackSrc) { // fade the bus, stop the source, restore the bus
+        const s = trackSrc; trackSrc = null;
+        const f = fade || 0.6, t = now(), g = musBus.gain;
+        g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(0.0001, t + f);
+        g.setValueAtTime(0.55, t + f + 0.05);
+        setTimeout(() => { try { s.stop(); } catch (e) { /* ignore */ } }, f * 1000 + 30);
+      }
+    }
+    return {
+      start, stop,
+      setIntensity(x) { intensity = Math.max(0, Math.min(1, x)); if (wantMusic) wantMusic.intensity = intensity; },
+      get intensity() { return intensity; },
+      get playing() { return playing; },
+      _setTrack(buf) { track = buf; if (playing) { stop(0.2); start(wantMusic || {}); } }
+    };
+  })();
+
+  // Optional: play a real music file instead of the generator (put it in the itch zip, e.g. music/theme.ogg).
+  function loadMusic(url) {
+    if (!ensure()) return Promise.reject(new Error('no audio'));
+    return fetch(url).then(r => r.arrayBuffer())
+      .then(buf => new Promise((res, rej) => ctx.decodeAudioData(buf, res, rej)))
+      .then(decoded => { music._setTrack(decoded); return decoded; });
+  }
+
+  // ---------------------------------------------------------------- enable / volume
+  function setEnabled(v) {
+    enabled = !!v;
+    try { localStorage.setItem(STORE_KEY, enabled ? '1' : '0'); } catch (e) { /* ignore */ }
+    if (!ctx) return;
+    master.gain.setTargetAtTime(enabled ? volume : 0, now(), 0.05);
+    if (enabled) { if (unlocked) { unlock(); if (wantAmbient) ambientStart(); if (wantMusic) music.start(wantMusic); } }
+    else { const m = wantMusic, a = wantAmbient; music.stop(0.1); ambient(false); wantMusic = m; wantAmbient = a; }
+  }
+  function setVolume(v) {
+    volume = Math.max(0, Math.min(1, v));
+    if (ctx && enabled) master.gain.setTargetAtTime(volume, now(), 0.05);
+  }
+
+  CR.Sound = {
+    play, duck, ambient, music, loadMusic, unlock, setEnabled, setVolume,
+    toggle() { setEnabled(!enabled); return enabled; },
+    get enabled() { return enabled; },
+    get unlocked() { return unlocked; },
+    get context() { return ctx; },
+    names: Object.keys(SFX)
+  };
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — behavioral memory model
+//
+// Tracks what the player does, persists it, and turns it into a deterministic "plan"
+// that level.js builds the next castle from. No randomness anywhere in here.
+//
+// Two layers:
+//   1. COUNTERS  — what the player does (decayed x0.8 per run so recent habits dominate).
+//   2. PRESSURE  — per adaptation category (door/lever/pace/guard/trap/chest), 0..3.
+//                  WIN : every behavior the player relied on gets +1 (stronger counter-adaptation).
+//                  LOSS: the category that killed them is kept at >= 1 and its counters are NOT
+//                        decayed (the castle keeps exploiting what already works); categories the
+//                        player did not exhibit fade by 1.
+//   tier(category) = 0 if the behavior is not detected, else 1 + pressure (capped at 3).
+(function (CR) {
+  'use strict';
+  const C = CR.C;
+  const DECAY = 0.8;
+  const MAX_PRESSURE = 3;
+  const CATS = ['door', 'lever', 'pace', 'guard', 'trap', 'chest'];
+  const COUNTERS = ['doorL', 'doorR', 'leverL', 'leverR', 'leversPulled', 'rush', 'wait', 'confronted', 'avoided', 'traps', 'chests', 'chestsSkipped'];
+  const RUN_COUNTED = ['doorL', 'doorR', 'leverL', 'leverR', 'leversPulled', 'confronted', 'avoided', 'traps', 'chests', 'chestsSkipped'];
+  // Which stored counters describe the behavior each category exploits.
+  const CAT_COUNTERS = {
+    door: ['doorL', 'doorR'], lever: ['leverL', 'leverR', 'leversPulled'], pace: ['rush', 'wait'],
+    guard: ['confronted', 'avoided'], trap: ['traps'], chest: ['chests', 'chestsSkipped']
+  };
+  const WORD = { L: 'LEFT', R: 'RIGHT' };
+  const other = s => (s === 'L' ? 'R' : 'L');
+  const r3 = v => Math.round(v * 1000) / 1000;
+  const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 'S'}`;
+
+  function emptyCats(v) { const o = {}; CATS.forEach(c => { o[c] = v; }); return o; }
+
+  function defaultModel() {
+    return {
+      version: 3, runs: 0, completions: 0, deaths: 0, streak: 0,
+      doorL: 0, doorR: 0, leverL: 0, leverR: 0, leversPulled: 0,
+      rush: 0, wait: 0, confronted: 0, avoided: 0, traps: 0, chests: 0, chestsSkipped: 0,
+      pressure: emptyCats(0),   // how hard the castle is pushing on each category
+      causes: emptyCats(0),     // deaths by category
+      bestTime: null, last: null
+    };
+  }
+
+  function sanitize(raw) {
+    const d = defaultModel();
+    if (!raw || typeof raw !== 'object') return d;
+    Object.keys(d).forEach(k => {
+      if (typeof d[k] === 'number' && typeof raw[k] === 'number' && isFinite(raw[k]) && raw[k] >= 0) d[k] = raw[k];
+    });
+    d.version = 3;
+    ['pressure', 'causes'].forEach(k => {
+      if (!raw[k] || typeof raw[k] !== 'object') return;
+      CATS.forEach(c => {
+        const v = raw[k][c];
+        if (typeof v === 'number' && isFinite(v) && v >= 0) d[k][c] = k === 'pressure' ? clampInt(v, 0, MAX_PRESSURE) : Math.round(v);
+      });
+    });
+    if (typeof raw.bestTime === 'number' && isFinite(raw.bestTime)) d.bestTime = raw.bestTime;
+    if (raw.last && typeof raw.last === 'object') d.last = raw.last;
+    return d;
+  }
+
+  function memoryStorage() {
+    const m = new Map();
+    return {
+      getItem: k => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, String(v)); },
+      removeItem: k => { m.delete(k); }
+    };
+  }
+
+  function load(storage) {
+    try {
+      const s = storage && storage.getItem(C.STORAGE_KEY);
+      return s ? sanitize(JSON.parse(s)) : defaultModel();
+    } catch (e) { return defaultModel(); }
+  }
+
+  function save(storage, mem) {
+    try { if (storage) storage.setItem(C.STORAGE_KEY, JSON.stringify(mem)); return true; } catch (e) { return false; }
+  }
+
+  function reset(storage) {
+    try { if (storage) storage.removeItem(C.STORAGE_KEY); } catch (e) { /* ignore */ }
+    return defaultModel();
+  }
+
+  function newRunStats() {
+    return {
+      doorL: 0, doorR: 0, leverL: 0, leverR: 0, leversPulled: 0,
+      confronted: 0, avoided: 0, traps: 0, shards: 0, chests: 0, chestsSkipped: 0, chestsAvail: 0,
+      time: 0, idle: 0, maxFloor: 0, outcome: null, cause: null, causeCat: null, deathFloor: null
+    };
+  }
+
+  // Rushing vs waiting: fraction of the run spent standing still.
+  function idleRatio(run) { return run.time > 0 ? run.idle / run.time : 0; }
+  function classifyPace(run) { return idleRatio(run) < 0.18 ? 'rush' : 'wait'; }
+
+  // Which categories did this run actually exhibit?
+  function usedCategories(run) {
+    return {
+      door: run.doorL + run.doorR > 0,
+      lever: run.leversPulled > 0,
+      pace: true,
+      guard: run.confronted + run.avoided > 0,
+      trap: run.traps > 0,
+      chest: run.chests > 0
+    };
+  }
+
+  function mergeRun(mem, run) {
+    const m = sanitize(JSON.parse(JSON.stringify(mem)));
+    const win = run.outcome === 'win';
+    const weight = win ? 2 : 1;                       // a behavior that got you out counts double
+    const causeCat = win ? null : (CATS.includes(run.causeCat) ? run.causeCat : 'guard');
+    const keep = causeCat ? CAT_COUNTERS[causeCat] : [];
+
+    COUNTERS.forEach(k => { if (!keep.includes(k)) m[k] = r3(m[k] * DECAY); });
+    RUN_COUNTED.forEach(k => { m[k] = r3(m[k] + (run[k] || 0) * weight); });
+    const pace = classifyPace(run);
+    m[pace] = r3(m[pace] + weight);
+
+    const used = usedCategories(run);
+    CATS.forEach(c => {
+      if (win) { if (used[c]) m.pressure[c] = Math.min(MAX_PRESSURE, m.pressure[c] + 1); }
+      else if (c === causeCat) m.pressure[c] = Math.max(1, m.pressure[c]);
+      else if (!used[c]) m.pressure[c] = Math.max(0, m.pressure[c] - 1);
+    });
+
+    m.runs += 1;
+    if (win) {
+      m.completions += 1;
+      m.streak += 1;
+      if (m.bestTime === null || run.time < m.bestTime) m.bestTime = r3(run.time);
+    } else {
+      m.deaths += 1;
+      m.streak = 0;
+      m.causes[causeCat] += 1;
+    }
+    m.last = {
+      outcome: run.outcome, cause: run.cause, causeCat, deathFloor: run.deathFloor,
+      time: r3(run.time), pace, idle: Math.round(idleRatio(run) * 100),
+      doorL: run.doorL, doorR: run.doorR, leverL: run.leverL, leverR: run.leverR, levers: run.leversPulled,
+      confronted: run.confronted, avoided: run.avoided, traps: run.traps,
+      chests: run.chests, chestsSkipped: run.chestsSkipped, chestsAvail: run.chestsAvail,
+      shards: run.shards, maxFloor: run.maxFloor
+    };
+    return m;
+  }
+
+  // A side is "favored" only when the evidence is clear, not on a coin flip.
+  function favored(a, b) {
+    const t = a + b;
+    if (t < 0.9 || Math.abs(a - b) < 0.9 || Math.max(a, b) / t < 0.6) return null;
+    return a > b ? 'L' : 'R';
+  }
+
+  // "Opens every chest": clearly more opened than walked past.
+  function greedy(mem) { return mem.chests >= 1.5 && mem.chests > 2 * mem.chestsSkipped; }
+
+  // Deterministic: same memory in → same plan out.
+  function buildPlan(mem) {
+    const plan = {
+      first: mem.runs === 0,
+      tiers: emptyCats(0),
+      doorPref: null, leverPref: null, paceMode: null, guardMode: null, chestMode: null,
+      exitSide: 'R', exitGuards: 1,
+      levers: { 1: { L: 'open', R: 'open' }, 3: { L: 'open', R: 'open' } },
+      chests: { 0: 'real', 1: 'real', 2: 'real', 3: 'real' },
+      gateClose: 0,
+      notes: [] // { cat, floor, whisper, line } — whisper shows in-game, line shows on the end screen
+    };
+    if (plan.first) return plan;
+    const tier = (on, cat) => (on ? Math.min(MAX_PRESSURE, 1 + mem.pressure[cat]) : 0);
+    const note = (cat, floor, whisper, line) => plan.notes.push({ cat, floor, whisper, line });
+    const T = plan.tiers;
+
+    // ---- door / route preference
+    plan.doorPref = favored(mem.doorL, mem.doorR);
+    T.door = tier(!!plan.doorPref, 'door');
+    if (T.door) {
+      const P = WORD[plan.doorPref], O = WORD[other(plan.doorPref)];
+      const lines = [null,
+        `You favor ${P} doors. Retracting spikes now guard the ${P} corridor on floor 1, and the ${O} door on floor 3 stands open with a shard behind it.`,
+        `You keep taking ${P} doors. The floor-1 ${P} door moved next to the spikes, a guard walks the ${P} corridor on floor 3, and the ${O} ladder on floor 1 now climbs straight to floor 3.`,
+        `${P} doors are your habit. The floor-3 ${P} door is bricked up and a guard walks the floor-1 ${P} corridor. The ${O} ladder on floor 1 still climbs to floor 3.`];
+      note('door', 0, `…you always go ${P.toLowerCase()}.`, lines[T.door]);
+      note('door', 2, T.door >= 3 ? `…the ${P.toLowerCase()} way is gone.` : `…the ${O.toLowerCase()} door was left open for you.`, null);
+    }
+
+    // ---- lever trust
+    plan.leverPref = favored(mem.leverL, mem.leverR);
+    T.lever = tier(!!plan.leverPref, 'lever');
+    if (T.lever) {
+      const P = plan.leverPref, O = other(P);
+      plan.levers[3][P] = 'trap';
+      if (T.lever === 2) plan.levers[1][P] = 'dud';
+      if (T.lever >= 3) { plan.levers[1][P] = 'trap'; plan.levers[3][O] = 'alarm'; }
+      const lines = [null,
+        `You trust the ${WORD[P]} lever. On floor 4 it is now a trap.`,
+        `You keep trusting the ${WORD[P]} lever. On floor 2 it is jammed; on floor 4 it is a trap.`,
+        `The ${WORD[P]} lever is your habit. It is trapped on floors 2 and 4, and the other floor-4 lever now wakes the guard.`];
+      note('lever', T.lever >= 2 ? 1 : 3, '…it knows which lever you trust.', lines[T.lever]);
+      if (T.lever >= 2) note('lever', 3, '…the lever you trust is here too.', null);
+    }
+
+    // ---- pace
+    if (mem.rush > mem.wait) plan.paceMode = 'rush';
+    else if (mem.wait > mem.rush) plan.paceMode = 'wait';
+    T.pace = tier(!!plan.paceMode, 'pace');
+    if (plan.paceMode === 'rush') {
+      const lines = [null,
+        'You rush. Guards now move faster.',
+        'You never stop. A guard now waits where you climb onto floor 3, and the top guard covers the ladder.',
+        'Rushing is your habit. Spikes now flank the floor-2 ladder; they only retract for those who wait.'];
+      note('pace', T.pace >= 3 ? 1 : 2, '…you never stop to look.', lines[T.pace]);
+    } else if (plan.paceMode === 'wait') {
+      plan.gateClose = [0, 5, 3.5, 2.5][T.pace];
+      const lines = [null,
+        'You linger. Opened gates now slam shut after 5 seconds.',
+        'You keep lingering. Gates now close after 3.5 seconds and the spikes stay up longer.',
+        'Waiting is your habit. Gates close in 2.5 seconds, and the top guard now patrols the whole floor.'];
+      note('pace', 1, '…you like to wait.', lines[T.pace]);
+    }
+
+    // ---- guards
+    const cd = mem.confronted - mem.avoided;
+    if (cd >= 0.9) plan.guardMode = 'brace';
+    else if (cd <= -0.9) plan.guardMode = 'watch';
+    T.guard = tier(!!plan.guardMode, 'guard');
+    if (plan.guardMode === 'brace') {
+      const lines = [null,
+        'You shove guards. They now recover in half the time.',
+        'You keep shoving. The top guard is now a heavy: armored, two shoves.',
+        'Shoving is your habit. Every guard is now a heavy.'];
+      note('guard', 3, '…the guards have felt your hands.', lines[T.guard]);
+    } else if (plan.guardMode === 'watch') {
+      const lines = [null,
+        'You slip past guards. The patrols now turn and chase when you come close.',
+        'You keep slipping past. Patrols now cover the full width of their floors.',
+        'Slipping past is your habit. An archer now covers floor 4: jump the arrows.'];
+      note('guard', 3, '…the guards know you slip past.', lines[T.guard]);
+    }
+
+    // ---- traps
+    T.trap = tier(mem.traps >= 1.5, 'trap');
+    if (T.trap) {
+      const lines = [null,
+        'You spring traps. The spikes have grown wider.',
+        'You keep springing traps. New spikes sit between the floor-4 levers and the ladder.',
+        'Traps are your habit. Spikes now guard the exit itself.'];
+      note('trap', T.trap >= 2 ? 3 : 2, '…the spikes grew for you.', lines[T.trap]);
+    }
+
+    // ---- chests
+    if (greedy(mem)) plan.chestMode = 'greedy';
+    T.chest = tier(!!plan.chestMode, 'chest');
+    if (T.chest) {
+      plan.chests[3] = 'trap';
+      if (T.chest >= 2) plan.chests[1] = 'trap';
+      if (T.chest >= 3) plan.chests[0] = 'trap';
+      const lines = [null,
+        'You open every chest. The chest on floor 4 is now a trap.',
+        'You keep opening chests. The chests on floors 2 and 4 are traps.',
+        'Chests are your habit. Only the floor-3 chest is real now; the rest bite.'];
+      note('chest', T.chest >= 3 ? 0 : (T.chest >= 2 ? 1 : 3), '…it saw you open every box.', lines[T.chest]);
+    }
+
+    // ---- escapes
+    if (mem.completions >= 1 && plan.doorPref) {
+      plan.exitSide = other(plan.doorPref);
+      note('exit', 4, '…the way out has moved.', `You escaped. The exit moved to the ${WORD[plan.exitSide]}, away from your habit.`);
+    }
+    if (mem.completions >= 2) {
+      plan.exitGuards = 2;
+      note('exit', 4, '…it will not let you leave so easily.', 'You keep escaping. An archer now guards the exit.');
+    }
+    return plan;
+  }
+
+  // One specific observation for the reconstruction screen (uppercase, deterministic).
+  function describeObservation(mem, plan) {
+    const l = mem.last;
+    if (!l) return 'IT HAS NOT SEEN YOU YET.';
+    const doors = l.doorL + l.doorR, levers = l.leverL + l.leverR;
+    const doorSide = l.doorL > l.doorR ? 'LEFT' : 'RIGHT', doorN = Math.max(l.doorL, l.doorR);
+    const leverSide = l.leverL > l.leverR ? 'LEFT' : 'RIGHT', leverN = Math.max(l.leverL, l.leverR);
+    const fl = l.deathFloor === null || l.deathFloor === undefined ? l.maxFloor + 1 : l.deathFloor + 1;
+    const chests = l.chests || 0, avail = l.chestsAvail || 0;
+    if (l.outcome !== 'win') {
+      switch (l.causeCat) {
+        case 'door': return `YOU WENT ${doorSide} AGAIN (${doorN} OF ${doors} DOORS). THE ${doorSide} SIDE STAYS ARMED.`;
+        case 'lever': return `YOU PULLED THE ${leverSide} LEVER AGAIN. IT STAYS ARMED.`;
+        case 'pace': return l.pace === 'rush'
+          ? `YOU RUSHED (${l.idle}% STANDING STILL). THE AMBUSH STAYS.`
+          : `YOU WAITED (${l.idle}% STANDING STILL). THE GATES KEEP CLOSING.`;
+        case 'trap': return `YOU SPRANG ${plural(l.traps, 'TRAP')} AND FELL ON FLOOR ${fl}. THE SPIKES STAY.`;
+        case 'chest': return `YOU OPENED ${plural(chests, 'CHEST')}. THE CASTLE PACKED ONE FOR YOU. IT STAYS PACKED.`;
+        default: return /arrow/i.test(l.cause || '')
+          ? `AN ARROW FOUND YOU ON FLOOR ${fl}. SHOVED ${l.confronted}, SLIPPED PAST ${l.avoided}.`
+          : `A GUARD CAUGHT YOU ON FLOOR ${fl}. SHOVED ${l.confronted}, SLIPPED PAST ${l.avoided}.`;
+      }
+    }
+    // Win: the category the castle is now pushing hardest on (ties → fixed order).
+    let top = null, best = 0;
+    CATS.forEach(c => { if (plan.tiers[c] > best) { best = plan.tiers[c]; top = c; } });
+    switch (top) {
+      case 'door': return `YOU ESCAPED THROUGH ${doorSide} DOORS (${doorN} OF ${doors}).`;
+      case 'lever': return `YOU ESCAPED PULLING THE ${leverSide} LEVER (${leverN} OF ${levers}).`;
+      case 'pace': return plan.paceMode === 'rush'
+        ? `YOU ESCAPED IN ${l.time.toFixed(1)}s WITHOUT STOPPING (${l.idle}% STILL).`
+        : `YOU ESCAPED IN ${l.time.toFixed(1)}s BY WAITING (${l.idle}% STILL).`;
+      case 'guard': return plan.guardMode === 'brace'
+        ? `YOU ESCAPED BY SHOVING ${plural(l.confronted, 'GUARD')}.`
+        : `YOU ESCAPED BY SLIPPING PAST ${plural(l.avoided, 'GUARD')}.`;
+      case 'trap': return `YOU SPRANG ${plural(l.traps, 'TRAP')} AND STILL ESCAPED.`;
+      case 'chest': return `YOU ESCAPED AFTER OPENING ${chests} OF ${avail} CHESTS.`;
+      default: return `YOU ESCAPED IN ${l.time.toFixed(1)}s.`;
+    }
+  }
+
+  CR.Memory = {
+    DECAY, MAX_PRESSURE, CATS, WORD, defaultModel, sanitize, memoryStorage, load, save, reset,
+    newRunStats, idleRatio, classifyPace, usedCategories, mergeRun, favored, greedy, buildPlan, describeObservation
+  };
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — modular level builder + completability validator
+//
+// One castle, 5 floors, each floor assembled from a module chosen by the plan's tiers:
+//   Floor 1 & 3 (index 0, 2): CHOICE floors — a LEFT and a RIGHT door, each hiding a ladder.
+//   Floor 2 & 4 (index 1, 3): LEVER floors — a gate blocks the center ladder; two levers.
+//   Floor 5 (index 4):        EXIT floor — the final door onto the battlements.
+//
+// Safety comes from two things:
+//   * Construction rules: an adaptation only ever hardens ONE side of a choice floor and only
+//     ever changes the effect of the TRUSTED lever, so the other side / other lever stays open.
+//     Chests and guards are never route-critical (chests are optional, guards can be shoved/jumped).
+//   * validateLevel(): rebuilds the castle as a graph of (floor, region) nodes and checks that
+//     the exit is reachable from the start and from EVERY reachable node (no dead ends), plus
+//     geometry rules for spikes (jumpable width, clear of ladders/doors/levers/chests/exit) and
+//     archer posts (clear of ladders and spikes).
+(function (CR) {
+  'use strict';
+  const C = CR.C;
+  const SIDE_X = { L: 70, R: 650 };        // side ladders
+  const DOOR_X = { L: 230, R: 490 };       // default door positions
+  const DOOR_TIGHT = { L: 190, R: 530 };   // moved next to the spikes: no room to land past them
+  const LEVER_X = { L: 200, R: 520 };
+  const CHEST_X = { 0: 420, 1: 590, 2: 300, 3: 600 };   // clear of doors, ladders and every spike patch
+  const CENTER = 360;
+  const MAX_SPIKE_W = 72;                  // widest patch the jump clears with margin (range ≈ 155px)
+  const CLEAR = 34;                        // spikes keep this far from ladders, doors, levers, chests, exit
+  const OPENS = { open: true, alarm: true, trap: false, dud: false };
+  // Enemy types: speed factor, armor, behavior flags.
+  const TYPES = {
+    foot:   { speed: 1,    armor: 0, chase: false, ranged: false },
+    heavy:  { speed: 0.85, armor: 1, chase: false, ranged: false },
+    patrol: { speed: 1.25, armor: 0, chase: true,  ranged: false },
+    archer: { speed: 0,    armor: 0, chase: false, ranged: true }
+  };
+  const other = s => (s === 'L' ? 'R' : 'L');
+  const mirror = (x, w) => C.W - x - w;    // mirror a left-side patch to the right
+
+  function buildLevel(plan) {
+    const fy = C.floorY;
+    const T = plan.tiers || { door: 0, lever: 0, pace: 0, guard: 0, trap: 0, chest: 0 };
+    const pref = plan.doorPref, avoid = pref ? other(pref) : null;
+    const rush = plan.paceMode === 'rush' ? T.pace : 0;
+    const wait = plan.paceMode === 'wait' ? T.pace : 0;
+    const brace = plan.guardMode === 'brace' ? T.guard : 0;
+    const watch = plan.guardMode === 'watch' ? T.guard : 0;
+    const leverFx = plan.levers || { 1: { L: 'open', R: 'open' }, 3: { L: 'open', R: 'open' } };
+    const chestFx = plan.chests || { 0: 'real', 1: 'real', 2: 'real', 3: 'real' };
+    const paceSpeed = rush ? 1.35 : 1;
+    const stunTime = brace ? 1.2 : 3.0;
+    const spikeOn = wait >= 2 ? 1.3 : 1.0;   // lingerers get shorter safe windows
+    const baseType = brace >= 3 ? 'heavy' : (watch >= 1 ? 'patrol' : 'foot');
+
+    const L = {
+      floors: [], ladders: [], doors: [], levers: [], gates: [], guards: [],
+      spikes: [], shards: [], chests: [], exit: null, whispers: {}, start: { x: CENTER, floor: 0 }, modules: {}
+    };
+    for (let i = 0; i < C.FLOORS; i++) L.floors.push({ i, y: fy(i) });
+
+    const guard = (id, floor, min, max, x, extra) => {
+      extra = extra || {};
+      const type = extra.type || baseType;
+      const S = TYPES[type];
+      L.guards.push(Object.assign({
+        id, floor, min, max, x: x === undefined ? min : x, dir: 1, type,
+        speed: C.GUARD_SPEED * paceSpeed * S.speed, stunTime, stun: 0, armor: S.armor,
+        watch: S.chase, alert: false, alarm: 0, origin: 'base',
+        ranged: S.ranged, cooldown: 2.4, shootT: 1.2,
+        lastSide: 0, counted: false, confronted: false
+      }, extra, { type }));
+    };
+    const archer = (id, floor, x, dir, extra) => guard(id, floor, x, x, x, Object.assign({ type: 'archer', dir }, extra || {}));
+    const spike = (id, floor, x, w, extra) => L.spikes.push(Object.assign({
+      id, floor, x, w, retract: false, period: 2, on: 1.2, phase: 0, active: true, origin: 'trap'
+    }, extra || {}));
+    const door = (id, floor, x, side, extra) => L.doors.push(Object.assign({
+      id, floor, x, side, open: false, gift: false, locked: false, passed: false
+    }, extra || {}));
+    const ladder = (id, x, bottom, top, gate) => L.ladders.push({ id, x, bottom, top, gate: gate || null, long: top - bottom > 1 });
+
+    // ------------------------------------------------------------ choice floors (0, 2)
+    function choiceFloor(f) {
+      const desc = [];
+      ['L', 'R'].forEach(s => {
+        const role = s === pref ? 'favored' : (s === avoid ? 'avoided' : 'neutral');
+        let dx = DOOR_X[s], top = f + 1;
+        const d = {};
+        const bits = [];
+        if (role === 'favored') {
+          if (f === 0) {
+            spike(`s0${s}`, 0, s === 'L' ? 111 : mirror(111, 40), 40, { retract: true, period: 1.8, on: spikeOn, origin: 'door' });
+            bits.push('spikes');
+            if (T.door >= 2) { dx = DOOR_TIGHT[s]; bits.push('tight door'); }
+            if (T.door >= 3) {
+              guard(`G0${s}`, 0, s === 'L' ? 90 : 560, s === 'L' ? 160 : 630, s === 'L' ? 90 : 630, { dir: s === 'L' ? 1 : -1, origin: 'door' });
+              bits.push('guard');
+            }
+          } else if (T.door >= 3) {
+            d.locked = true; bits.push('BRICKED');
+          } else {
+            guard(`G2${s}`, 2, s === 'L' ? 110 : 520, s === 'L' ? 200 : 610, s === 'L' ? 110 : 610, { dir: s === 'L' ? 1 : -1, origin: 'door' });
+            bits.push('guard');
+          }
+        } else if (role === 'avoided') {
+          if (f === 0 && T.door >= 2) { top = 2; bits.push('long ladder'); }
+          if (f === 2) {
+            d.open = true; d.gift = true; bits.push('open door');
+            L.shards.push({ id: 'sh2', floor: 2, x: s === 'L' ? 100 : 620, collected: false });
+            bits.push('shard');
+          }
+        }
+        door(`d${f}${s}`, f, dx, s, d);
+        ladder(`l${f}${s}`, SIDE_X[s], f, top);
+        desc.push(`${s}:${role}${T.door && role !== 'neutral' ? T.door : ''}${bits.length ? '(' + bits.join(',') + ')' : ''}`);
+      });
+      if (f === 2) {
+        // Baseline corridor spikes on both sides; wider once traps are a habit,
+        // and retracting (timed) in the favored corridor at door tier 2.
+        const w = T.trap >= 1 ? 56 : 36;
+        ['L', 'R'].forEach(s => {
+          const timed = s === pref && T.door === 2;
+          spike(`s2${s}`, 2, s === 'L' ? 140 : mirror(140, w), w,
+            timed ? { retract: true, period: 1.8, on: spikeOn, origin: 'door' } : { origin: 'trap' });
+        });
+      }
+      L.modules[f] = `choice ${desc.join(' ')}`;
+    }
+
+    // ------------------------------------------------------------ lever floors (1, 3)
+    function leverFloor(f) {
+      const gate = { id: `g${f}`, floor: f, x: CENTER, open: false, openT: 0, autoClose: plan.gateClose || 0 };
+      L.gates.push(gate);
+      ladder(`l${f}C`, CENTER, f, f + 1, gate.id);
+      const fx = leverFx[f] || { L: 'open', R: 'open' };
+      ['L', 'R'].forEach(s => L.levers.push({
+        id: `v${f}${s}`, floor: f, x: LEVER_X[s], side: s, gate: gate.id,
+        effect: fx[s], trapped: fx[s] === 'trap', state: 'idle'
+      }));
+      const bits = [];
+      if (f === 1) {
+        guard('G1', 1, watch >= 2 ? 100 : 250, watch >= 2 ? 620 : 470, 300);
+        if (rush >= 3) {
+          spike('s1a', 1, 260, 40, { retract: true, period: 2.0, on: spikeOn, origin: 'pace' });
+          spike('s1b', 1, 420, 40, { retract: true, period: 2.0, on: spikeOn, origin: 'pace' });
+          bits.push('ladder spikes');
+        }
+      } else {
+        guard('G3', 3, watch >= 2 ? 100 : 140, watch >= 2 ? 620 : 580, 480, { dir: -1 });
+        if (watch >= 3) { archer('G3b', 3, 150, 1, { origin: 'guard' }); bits.push('archer'); }
+        if (T.trap >= 2) { spike('s3', 3, 420, 40, { retract: true, period: 2.0, on: spikeOn, origin: 'trap' }); bits.push('lever spikes'); }
+      }
+      if (gate.autoClose) bits.push(`gate closes ${gate.autoClose}s`);
+      L.modules[f] = `lever L:${fx.L} R:${fx.R}${bits.length ? ' (' + bits.join(', ') + ')' : ''}`;
+    }
+
+    // ------------------------------------------------------------ exit floor (4)
+    function exitFloor() {
+      const right = plan.exitSide !== 'L';
+      L.exit = { floor: 4, x: right ? 640 : 80, w: 50, h: 96 };
+      const cover = rush >= 2;             // patrol reaches the ladder top (ambush)
+      const full = wait >= 3;              // patrol covers the whole floor
+      const topType = brace >= 2 ? 'heavy' : baseType;
+      const bits = [];
+      if (full) guard('G4', 4, 100, 620, right ? 590 : 130, { dir: right ? -1 : 1, type: topType, origin: 'pace' });
+      else if (right) guard('G4', 4, cover ? 330 : 420, 590, 590, { dir: -1, type: topType, origin: cover ? 'pace' : 'base' });
+      else guard('G4', 4, 130, cover ? 390 : 300, 130, { type: topType, origin: cover ? 'pace' : 'base' });
+      if (cover) bits.push('ambush'); if (full) bits.push('full patrol'); if (topType === 'heavy') bits.push('heavy');
+      if (plan.exitGuards >= 2) {
+        archer('G4b', 4, right ? 500 : 220, right ? -1 : 1, { origin: 'win' });
+        bits.push('exit archer');
+      }
+      if (T.trap >= 3) { spike('s4', 4, right ? 560 : 120, 40, { retract: true, period: 2.0, on: spikeOn, origin: 'trap' }); bits.push('exit spikes'); }
+      L.modules[4] = `exit ${right ? 'RIGHT' : 'LEFT'}${bits.length ? ' (' + bits.join(', ') + ')' : ''}`;
+    }
+
+    if (rush >= 2) guard('G2m', 2, 270, 450, 450, { dir: -1, origin: 'pace' }); // ambush where you climb up
+    choiceFloor(0);
+    leverFloor(1);
+    choiceFloor(2);
+    leverFloor(3);
+    exitFloor();
+
+    // Chests: one per floor 1–4, optional loot; the greedy get bitten.
+    [0, 1, 2, 3].forEach(f => {
+      const trapped = chestFx[f] === 'trap';
+      L.chests.push({ id: `c${f}`, floor: f, x: CHEST_X[f], trapped, opened: false });
+      if (trapped) L.modules[f] += ' [chest: TRAP]';
+    });
+
+    (plan.notes || []).forEach(n => { (L.whispers[n.floor] = L.whispers[n.floor] || []).push(n.whisper); });
+    return L;
+  }
+
+  // ------------------------------------------------------------ graph + validator
+  // Regions: a choice floor is split by its doors into L / C / R; other floors are one region 'A'.
+  function levelGraph(L) {
+    const doorsOn = f => L.doors.filter(d => d.floor === f).sort((a, b) => a.x - b.x);
+    const regionOf = (f, x) => {
+      const ds = doorsOn(f);
+      if (!ds.length) return 'A';
+      const i = ds.filter(d => d.x < x).length;
+      return ds.length === 2 ? ['L', 'C', 'R'][i] : String(i);
+    };
+    const key = (f, r) => `${f}:${r}`;
+    const nodes = new Set();
+    const edges = [];
+    const gateOpenable = id => L.levers.some(v => v.gate === id && OPENS[v.effect]);
+    for (let f = 0; f < C.FLOORS; f++) {
+      const ds = doorsOn(f);
+      if (!ds.length) nodes.add(key(f, 'A'));
+      else ['L', 'C', 'R'].forEach(r => nodes.add(key(f, r)));
+      ds.forEach((d, i) => {
+        if (d.locked) return;
+        const a = key(f, ['L', 'C', 'R'][i]), b = key(f, ['L', 'C', 'R'][i + 1]);
+        edges.push({ from: a, to: b, via: 'door', obj: d });
+        edges.push({ from: b, to: a, via: 'door', obj: d });
+      });
+    }
+    L.ladders.forEach(l => {
+      if (l.gate && !gateOpenable(l.gate)) return;
+      const a = key(l.bottom, regionOf(l.bottom, l.x)), b = key(l.top, regionOf(l.top, l.x));
+      edges.push({ from: a, to: b, via: 'ladder', obj: l });
+      edges.push({ from: b, to: a, via: 'ladder', obj: l });
+    });
+    return {
+      nodes, edges, regionOf, key,
+      start: key(L.start.floor, regionOf(L.start.floor, L.start.x)),
+      exit: key(L.exit.floor, regionOf(L.exit.floor, L.exit.x))
+    };
+  }
+
+  function bfs(graph, from) {
+    const prev = new Map([[from, null]]);
+    const q = [from];
+    while (q.length) {
+      const n = q.shift();
+      graph.edges.forEach(e => {
+        if (e.from === n && !prev.has(e.to)) { prev.set(e.to, e); q.push(e.to); }
+      });
+    }
+    return prev;
+  }
+
+  function pathTo(prev, target) {
+    if (!prev.has(target)) return null;
+    const out = [];
+    let e = prev.get(target);
+    while (e) { out.unshift(e); e = prev.get(e.from); }
+    return out;
+  }
+
+  function validateLevel(L) {
+    const problems = [];
+    const onFloor = (arr, f) => arr.filter(o => o.floor === f);
+
+    L.spikes.forEach(s => {
+      if (s.w > MAX_SPIKE_W) problems.push(`${s.id}: too wide to jump (${s.w})`);
+      if (s.x < C.WALL_L + 10 || s.x + s.w > C.WALL_R - 10) problems.push(`${s.id}: outside walls`);
+      if (s.retract && !(s.on <= s.period - 0.4)) problems.push(`${s.id}: no safe window`);
+      const cx = s.x + s.w / 2, half = s.w / 2;
+      const near = (x, what) => { if (Math.abs(x - cx) < half + CLEAR) problems.push(`${s.id}: too close to ${what}`); };
+      L.ladders.forEach(l => { if (l.bottom === s.floor || l.top === s.floor) near(l.x, l.id); });
+      onFloor(L.doors, s.floor).forEach(d => near(d.x, d.id));
+      onFloor(L.levers, s.floor).forEach(v => near(v.x, v.id));
+      onFloor(L.shards, s.floor).forEach(sh => near(sh.x, sh.id));
+      onFloor(L.chests || [], s.floor).forEach(c => near(c.x, c.id));
+      onFloor(L.guards, s.floor).forEach(g => { if (g.ranged) near(g.x, g.id); });
+      if (L.exit.floor === s.floor) near(L.exit.x, 'exit');
+      onFloor(L.spikes, s.floor).forEach(o => {
+        if (o !== s && o.x < s.x + s.w + 100 && o.x + o.w > s.x - 100) problems.push(`${s.id}: too close to ${o.id} (no landing room)`);
+      });
+    });
+    L.gates.forEach(g => {
+      if (!L.levers.some(v => v.gate === g.id && OPENS[v.effect])) problems.push(`${g.id}: no lever opens it`);
+    });
+    L.guards.forEach(g => {
+      if (g.min > g.max || g.min < C.WALL_L + 15 || g.max > C.WALL_R - 15) problems.push(`${g.id}: bad patrol range`);
+      if (!g.ranged && g.min === g.max) problems.push(`${g.id}: patrol has no range`);
+      if (g.ranged) {
+        // An archer post must not sit on a ladder foot/top or on a chest.
+        L.ladders.forEach(l => { if ((l.bottom === g.floor || l.top === g.floor) && Math.abs(l.x - g.x) < 60) problems.push(`${g.id}: archer on ladder ${l.id}`); });
+        onFloor(L.chests || [], g.floor).forEach(c => { if (Math.abs(c.x - g.x) < 40) problems.push(`${g.id}: archer on chest ${c.id}`); });
+        if (L.exit.floor === g.floor && Math.abs(L.exit.x - g.x) < 60) problems.push(`${g.id}: archer blocks the exit`);
+      }
+    });
+    L.doors.forEach(d => {
+      if (d.x < C.WALL_L + 60 || d.x > C.WALL_R - 60) problems.push(`${d.id}: door too close to wall`);
+    });
+    (L.chests || []).forEach(c => {
+      L.ladders.forEach(l => { if ((l.bottom === c.floor || l.top === c.floor) && Math.abs(l.x - c.x) < 40) problems.push(`${c.id}: chest on ladder ${l.id}`); });
+      onFloor(L.doors, c.floor).forEach(d => { if (Math.abs(d.x - c.x) < 40) problems.push(`${c.id}: chest in a doorway`); });
+    });
+    [0, 2].forEach(f => {
+      const ds = onFloor(L.doors, f);
+      if (ds.length === 2 && ds.every(d => d.locked)) problems.push(`floor ${f}: both doors bricked`);
+    });
+
+    const graph = levelGraph(L);
+    const prev = bfs(graph, graph.start);
+    const path = pathTo(prev, graph.exit);
+    if (!path) problems.push('exit unreachable from start');
+    // No dead ends: from every reachable node the exit must still be reachable.
+    prev.forEach((e, node) => {
+      if (node === graph.exit) return;
+      if (!bfs(graph, node).has(graph.exit)) problems.push(`dead end at ${node}`);
+    });
+    const route = path ? [graph.start].concat(path.map(e => e.to)).join(' → ') : null;
+    return { ok: problems.length === 0, problems, path, route, graph };
+  }
+
+  CR.buildLevel = buildLevel;
+  CR.levelGraph = levelGraph;
+  CR.validateLevel = validateLevel;
+  CR.LEVEL_RULES = { MAX_SPIKE_W, CLEAR, OPENS, TYPES };
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — procedural pixel art (no image files)
+// Every sprite is a small character map drawn at PX=2 (one map pixel = 2×2 canvas px).
+// Frames are rasterised once into offscreen canvases when a document exists; in Node (tests)
+// they are drawn directly with fillRect.
+(function (CR) {
+  'use strict';
+  const PX = 2;
+
+  // Visigothic dusk palette
+  const PAL = {
+    k: '#14101a', // outline / dark
+    s: '#e8c19b', S: '#c99a72',            // skin, skin shadow
+    h: '#2a1c14',                          // hair / beard
+    c: '#a3262a', C: '#6e1519',            // hero cloak
+    t: '#6d5433', T: '#4a3722',            // tunic
+    b: '#3a2a1a', g: '#d8b04c',            // belt, gold
+    w: '#c9ced8', W: '#8a8f9c',            // steel
+    l: '#4a3219',                          // leather
+    m: '#8a8f9c', M: '#5d626f',            // mail
+    H: '#a9aeb9', i: '#4e535f',            // helmet, iron
+    r: '#7a1c22', R: '#4d1015',            // shield red
+    e: '#ffffff',                          // eye white / string
+    p: '#8a7a6a',                          // spear shaft
+    o: '#4f5a30', O: '#333d1e',            // archer green
+    n: '#3d4a6b', N: '#27304a',            // patrol blue cloak
+    y: '#fff1a8', f: '#ffb347', F: '#ff6a2a', // flame
+    d: '#6b4a2b', D: '#4a3219', L: '#8c6a3f', // wood
+    x: '#4a4e60', X: '#2c2f3c', z: '#5c6175', // stone
+    u: '#8f1f24', U: '#5c1216',            // banner
+    a: '#f2a65a', A: '#c8474a', v: '#3b2145', V: '#161226', // sunset sky
+    q: '#7fe8ff'                           // shard cyan
+  };
+
+  const MAPS = {};
+  const def = (name, str) => { MAPS[name] = str.replace(/^\n/, '').split('\n').filter(r => r.length); };
+
+  // ---------------------------------------------------------------- HERO (16×24, faces right)
+  def('hero_idle', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhsssss....
+....hhssssss....
+....hhssksks....
+....hhssssss....
+....hhhsssSs....
+.....hhhhhhS....
+......hhhhh.....
+....cckgtttk....
+...ccckttttts...
+...ccckttttts...
+...ccckttttts...
+...cgckttttts...
+...cwckbbbbbs...
+..cwcckttttt....
+..w.cckttttt....
+..w..kktttttk...
+......TT.TT.....
+......TT.TT.....
+......ll.ll.....
+.....lll.lll....
+.....kkk.kkk....`);
+
+  def('hero_walk1', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhsssss....
+....hhssssss....
+....hhssksks....
+....hhssssss....
+....hhhsssSs....
+.....hhhhhhS....
+......hhhhh.....
+..cccckgtttk....
+.cccccktttttt...
+.ccccckttttt.t..
+.ccccckttttt.s..
+..cgcckttttt....
+..cwcckbbbbb....
+.cwccckttttt....
+.w..cckttttt....
+.w...kktttttk...
+.....TT...TT....
+....TT.....TT...
+....ll.....ll...
+...lll.....lll..
+...kkk.....kkk..`);
+
+  def('hero_walk2', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhsssss....
+....hhssssss....
+....hhssksks....
+....hhssssss....
+....hhhsssSs....
+.....hhhhhhS....
+......hhhhh.....
+...ccckgtttk....
+..cccckttttt....
+..cccckttttts...
+..cccckttttts...
+..cgcckttttt....
+..cwcckbbbbb....
+.cwccckttttt....
+.w..cckttttt....
+.w...kktttttk...
+.......TTTT.....
+.......TT.TT....
+.......ll.ll....
+......lll.lll...
+......kkk.kkk...`);
+
+  // Seen from behind while climbing (cloak covers the back).
+  def('hero_climb1', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+.s..hhhhhhhh....
+.s..hhhhhhhh....
+.t..hhhhhhhh....
+.t...hhhhhh.....
+.t....hhhh......
+.tt..cccccc.....
+..t.cccccccc....
+..tccccccccct...
+...ccccccccct...
+...ccccccccct...
+...cccccccccts..
+...cccccccccts..
+...cccccccccc...
+...cccccccccc...
+....cccccccc....
+.....cccccc.....
+....TT..........
+....TT....TT....
+....ll....TT....
+...lll....ll....
+...kkk....kkk...`);
+
+  def('hero_climb2', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhhhhhh..s.
+....hhhhhhhh..s.
+....hhhhhhhh..t.
+.....hhhhhh...t.
+......hhhh....t.
+.....cccccc..tt.
+....cccccccc.t..
+...tccccccccct..
+...tcccccccccc..
+...tcccccccccc..
+..sttcccccccc...
+..sttcccccccc...
+...cccccccccc...
+...cccccccccc...
+....cccccccc....
+.....cccccc.....
+..........TT....
+....TT....TT....
+....TT....ll....
+....ll...lll....
+...kkk...kkk....`);
+
+  def('hero_interact', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhsssss....
+....hhssssss....
+....hhssksks....
+....hhssssss....
+....hhhsssSs....
+.....hhhhhhS....
+......hhhhh.....
+....cckgtttk....
+...ccckttttttts.
+...ccckttttt....
+...ccckttttt....
+...cgckttttt....
+...cwckbbbbb....
+..cwcckttttt....
+..w.cckttttt....
+..w..kktttttk...
+......TT.TT.....
+......TT.TT.....
+......ll.ll.....
+.....lll.lll....
+.....kkk.kkk....`);
+
+  def('hero_hurt', `
+.....hhhh.......
+....hhhhhh......
+...hhhhhhhh.....
+...hhhsssss.....
+...hhssssss.....
+...hhsskssk.....
+...hhssskss.....
+...hhhsssSs.....
+....hhhhhhS.....
+.....hhhhh......
+..s.cckgtttk.s..
+..t.ccckttttt.t.
+...tcccktttttt..
+...ccccktttttt..
+...ccccktttttt..
+...cccckbbbbb...
+..ccccckttttt...
+..cccccktttttt..
+.....kkkttttk...
+......TT..TT....
+.....TT....TT...
+.....ll....ll...
+....lll....lll..
+....kkk....kkk..`);
+
+  // Lying down (24×12)
+  def('hero_dead', `
+........................
+..........cccccccccc....
+..hhhh..cccccttttttttt..
+.hhhhhh.ccccktttttttTT..
+.hsssshhcccckbbtttttTTll
+.hskskhhcccckttttttTTlll
+.hsssshh.cccktttttttTlll
+..hhhh...ccckttttttTT.ll
+..........c.kkkkkkkk....
+............w...........
+...........gw...........
+........................`);
+
+  // ---------------------------------------------------------------- GUARDS (16×24, face right)
+  def('foot_walk1', `
+.......HH.....p.
+......HHHH....p.
+.....HHHHHH...p.
+.....HHHHHH...p.
+.....HiHHHH...p.
+.....HssksHk..p.
+......ssssss..p.
+......SssssS..p.
+.......ssss...p.
+..rrr.mmmmmm..p.
+.rrRrrmmmmmmm.p.
+.rrgrrmmmmmm.ps.
+.rrrrrmmmmmm..p.
+.rrRrrmmmmmm..p.
+..rrr.mmmmmm..p.
+......MbbbbM..p.
+......TTTTTT..p.
+......TTTTTT..p.
+.....kTTTTTTk.p.
+.....MM...MM..p.
+....MM.....MM.p.
+....ll.....ll.p.
+...lll.....lll..
+...kkk.....kkk..`);
+
+  def('foot_walk2', `
+.......HH.....p.
+......HHHH....p.
+.....HHHHHH...p.
+.....HHHHHH...p.
+.....HiHHHH...p.
+.....HssksHk..p.
+......ssssss..p.
+......SssssS..p.
+.......ssss...p.
+..rrr.mmmmmm..p.
+.rrRrrmmmmmmm.p.
+.rrgrrmmmmmm.ps.
+.rrrrrmmmmmm..p.
+.rrRrrmmmmmm..p.
+..rrr.mmmmmm..p.
+......MbbbbM..p.
+......TTTTTT..p.
+......TTTTTT..p.
+.....kTTTTTTk.p.
+.......MMMM...p.
+.......MM.MM..p.
+.......ll.ll..p.
+......lll.lll...
+......kkk.kkk...`);
+
+  def('foot_stun', `
+................
+................
+.....HH.........
+....HHHH........
+...HHHHHH.....p.
+...HHHHHH.....p.
+...HiHHHH.....p.
+...HsskskHk...p.
+....ssssss....p.
+....SssssS....p.
+..rr.ssss.....p.
+.rrRrmmmmmm...p.
+.rrgrrmmmmmm..p.
+.rrrrrmmmmmm.ps.
+.rrRrrmmmmmm..p.
+..rrr.mmmmmm..p.
+......MbbbbM..p.
+......TTTTTT..p.
+......TTTTTT..p.
+.....kTTTTTTk.p.
+......MM.MM...p.
+......MM.MM...p.
+.....lll.lll....
+.....kkk.kkk....`);
+
+  // Heavy: full helm, broad mail, kite shield in front
+  def('heavy_walk1', `
+......HHHH....p.
+.....HHHHHH...p.
+....HHHHHHHH..p.
+....HHHHHHHH..p.
+....HHkHHkHH..p.
+....HHHiiHHH..p.
+....HHHHHHHH..p.
+.....HHHHHH...p.
+......MMMM....p.
+....MMMMMMMMrrr.
+...MMMMMMMMrrRrr
+...MMMMMMMMrgrrr
+...MMMMMMMMrrrrr
+...MMMMMMMMrgrrr
+...MMMMMMMMrgggr
+...MMMbbbbMrgrrr
+...MMMMMMMM.rrr.
+....MMMMMMM..r..
+...kMMMMMMMk..p.
+....MM....MM..p.
+...MM......MM.p.
+...ll......ll.p.
+..lll......lll..
+..kkk......kkk..`);
+
+  def('heavy_walk2', `
+......HHHH....p.
+.....HHHHHH...p.
+....HHHHHHHH..p.
+....HHHHHHHH..p.
+....HHkHHkHH..p.
+....HHHiiHHH..p.
+....HHHHHHHH..p.
+.....HHHHHH...p.
+......MMMM....p.
+....MMMMMMMMrrr.
+...MMMMMMMMrrRrr
+...MMMMMMMMrgrrr
+...MMMMMMMMrrrrr
+...MMMMMMMMrgrrr
+...MMMMMMMMrgggr
+...MMMbbbbMrgrrr
+...MMMMMMMM.rrr.
+....MMMMMMM..r..
+...kMMMMMMMk..p.
+......MMMM....p.
+......MM.MM...p.
+......ll.ll...p.
+.....lll.lll....
+.....kkk.kkk....`);
+
+  def('heavy_stun', `
+................
+................
+......HHHH......
+.....HHHHHH.....
+....HHHHHHHH..p.
+....HHHHHHHH..p.
+....HHkHHkHH..p.
+....HHHiiHHH..p.
+....HHHHHHHH..p.
+.....HHHHHH...p.
+......MMMM..rrr.
+....MMMMMMMrrRrr
+...MMMMMMMMrgrrr
+...MMMMMMMMrrrrr
+...MMMMMMMMrgrrr
+...MMMMMMMMrgggr
+...MMMbbbbMrgrrr
+...MMMMMMMM.rrr.
+....MMMMMMM..r..
+...kMMMMMMMk..p.
+.....MM..MM...p.
+.....MM..MM...p.
+....lll..lll....
+....kkk..kkk....`);
+
+  // Patrol: skullcap, blue cloak, spear, no shield — a runner
+  def('patrol_walk1', `
+......HHHH....p.
+.....HHHHHH...p.
+.....HHHHHH...p.
+.....hssksk...p.
+.....hssssss..p.
+.....hSssssS..p.
+......hssss...p.
+.......ssss...p.
+..nnnnkmmmmk..p.
+.nnnnnkmmmmmm.p.
+.nnnnnkmmmmm.ps.
+.nnnnnkmmmmm..p.
+.nnnnnkmmmmm..p.
+.nnnnnkmmmmm..p.
+.nNnnnkMbbbM..p.
+.nnnnnkTTTTT..p.
+.nNnnnkTTTTT..p.
+..nnn.kTTTTTk.p.
+..n...........p.
+.....MM...MM..p.
+....MM.....MM.p.
+....ll.....ll.p.
+...lll.....lll..
+...kkk.....kkk..`);
+
+  def('patrol_walk2', `
+......HHHH....p.
+.....HHHHHH...p.
+.....HHHHHH...p.
+.....hssksk...p.
+.....hssssss..p.
+.....hSssssS..p.
+......hssss...p.
+.......ssss...p.
+...nnnkmmmmk..p.
+..nnnnkmmmmmm.p.
+..nnnnkmmmmm.ps.
+..nnnnkmmmmm..p.
+..nnnnkmmmmm..p.
+..nnnnkmmmmm..p.
+..nNnnkMbbbM..p.
+..nnnnkTTTTT..p.
+..nNnnkTTTTT..p.
+...nn.kTTTTTk.p.
+..............p.
+.......MMMM...p.
+.......MM.MM..p.
+.......ll.ll..p.
+......lll.lll...
+......kkk.kkk...`);
+
+  def('patrol_stun', `
+................
+................
+....HHHH........
+...HHHHHH.......
+...HHHHHH.....p.
+...hsskskk....p.
+...hssssss....p.
+...hSssssS....p.
+....hssss.....p.
+.....ssss.....p.
+..nnnnkmmmmk..p.
+.nnnnnkmmmmmm.p.
+.nnnnnkmmmmm.ps.
+.nnnnnkmmmmm..p.
+.nnnnnkmmmmm..p.
+.nNnnnkMbbbM..p.
+.nnnnnkTTTTT..p.
+.nNnnnkTTTTT..p.
+..nnn.kTTTTTk.p.
+..n...........p.
+......MM.MM...p.
+......MM.MM...p.
+.....lll.lll....
+.....kkk.kkk....`);
+
+  // Archer: green hood, bow held in front
+  def('archer_idle', `
+......oooo......
+.....oooooo.....
+....oooooooo....
+....ooosssss....
+....oossssss..D.
+....oossksks..D.
+....oossssss.D..
+....ooossssS.D..
+.....ooooooS.D..
+......ssss..De..
+....ooOkoooo.De.
+...oooOkoooooDe.
+...oooOkoooooDe.
+...oooOkooooooe.
+...oooOkoooosDe.
+...oooOkbbbb.De.
+...ooookoooo.D..
+...ooookoooo.D..
+....ooookoook.D.
+......TT.TT...D.
+......TT.TT.....
+......ll.ll.....
+.....lll.lll....
+.....kkk.kkk....`);
+
+  def('archer_shoot', `
+......oooo......
+.....oooooo.....
+....oooooooo....
+....ooosssss....
+....oossssss..D.
+....oossksks..D.
+....oossssss.D..
+....ooossssS.D..
+.....ooooooS.D..
+......ssss..De..
+....ooOkooooDe..
+...oooOkooooDe..
+..sooOOkooooDe..
+..soooOkoooopppW
+...oooOkooooDe..
+...oooOkbbbbDe..
+...ooookoooo.D..
+...ooookoooo.D..
+....ooookoook.D.
+......TT.TT...D.
+......TT.TT.....
+......ll.ll.....
+.....lll.lll....
+.....kkk.kkk....`);
+
+  // ---------------------------------------------------------------- PROPS
+  def('chest_closed', `
+..dddddddd..
+.dLLLLLLLLd.
+dLLiLLLLiLLd
+dddiddddiddd
+dddiddgdiddd
+dddidgggiddd
+dddiddgdiddd
+dddiddddiddd
+DDDiDDDDiDDD
+.DDDDDDDDDD.`);
+
+  def('chest_open', `
+..dddddddd..
+.dLLLLLLLLd.
+dLLiLLLLiLLd
+dkkkkkkkkkkd
+dkkkqqqqkkkd
+dkkkkqqkkkkd
+dddiddddiddd
+dddiddddiddd
+DDDiDDDDiDDD
+.DDDDDDDDDD.`);
+
+  def('banner', `
+iiiiiiiiii
+.uuuuuuuu.
+.uuuuuuuu.
+.uuuggguu.
+.uuuuguuu.
+.uugggggu.
+.uuuuguuu.
+.uuuuguuu.
+.uuuuguuu.
+.uuuuuuuu.
+.uuuuuuuu.
+.uuuuuuuu.
+.uUuuuuUu.
+.uUuuuuUu.
+.uuuuuuuu.
+.uuuuuuuu.
+.uUuuuuUu.
+.uuuuuuuu.
+.uuuuuuuu.
+.uUuuuuUu.
+.uu.UU.uu.
+.u......u.`);
+
+  def('torch1', `
+..yy..
+.yfyf.
+.ffff.
+fFffFf
+.FffF.
+..dd..
+..dd..
+..dd..
+.iiii.
+.iiii.
+..ii..`);
+
+  def('torch2', `
+...y..
+.yyfy.
+.fyff.
+.FfFf.
+fFffFf
+..dd..
+..dd..
+..dd..
+.iiii.
+.iiii.
+..ii..`);
+
+  // Horseshoe-arch window with the dusk outside (16×20)
+  def('window', `
+.....xxxxxx.....
+...xxzzzzzzxx...
+..xzzVVVVVVzzx..
+.xzVVVVVVVVVVzx.
+.xzVVVVVVVVVVzx.
+xzVVVVVvvvvVVVzx
+xzvvvvvvvvvvvvzx
+xzvvvvvvvvvvvvzx
+.xzvvvAAAAvvvzx.
+.xzAAAAAAAAAAzx.
+.xzAAAAAAAAAAzx.
+.xzAAAaaaaAAAzx.
+.xzaaaaaaaaaazx.
+.xzaaaaaaaaaazx.
+.xzaaVVaaaVVazx.
+.xzVVVVVVVVVVzx.
+.xzVVVVVVVVVVzx.
+.xxxxxxxxxxxxxx.
+..xxzzzzzzzzxx..
+..xxxxxxxxxxxx..`);
+
+  // Arch cap over a doorway (20×10), horseshoe: widest above the springing line
+  def('arch', `
+.......xxxxxx.......
+.....xxzzzzzzxx.....
+....xzzXXXXXXzzx....
+...xzXXXXXXXXXXzx...
+..xzXXXXXXXXXXXXzx..
+..xzXXXXXXXXXXXXzx..
+.xzXXXXXXXXXXXXXXzx.
+.xzXXXXXXXXXXXXXXzx.
+..xzXXXXXXXXXXXXzx..
+..xzXXXXXXXXXXXXzx..`);
+
+  // The final door: a great horseshoe arch open onto the dusk (20×28, drawn at ×4)
+  def('exitarch', `
+.......xxxxxx.......
+.....xxzzzzzzxx.....
+....xzzVVVVVVzzx....
+...xzVVVVVVVVVVzx...
+..xzVVVVVVVVVVVVzx..
+..xzVVVVvvvvVVVVzx..
+.xzVVvvvvvvvvvvVVzx.
+.xzvvvvvvvvvvvvvvzx.
+.xzvvvvvvvvvvvvvvzx.
+..xzvvvvvvvvvvvvzx..
+..xzvvvAAAAAAvvvzx..
+..xzAAAAAAAAAAAAzx..
+..xzAAAAAAAAAAAAzx..
+..xzAAAAaaaaAAAAzx..
+..xzAAaaaaaaaaAAzx..
+..xzaaaaaaaaaaaazx..
+..xzaaaaaaaaaaaazx..
+..xzaaaaaaaaaaaazx..
+..xzaaaVVVaaaVVazx..
+..xzaaVVVVVaVVVVzx..
+..xzVVVVVVVVVVVVzx..
+..xzVVVVVVVVVVVVzx..
+..xzVVVVVVVVVVVVzx..
+..xzXXXXXXXXXXXXzx..
+..xzzzzzzzzzzzzzzx..
+..xzXXXXXXXXXXXXzx..
+..xzzzzzzzzzzzzzzx..
+..xxxxxxxxxxxxxxxx..`);
+
+  // Standing on the battlements, cloak caught by the wind (two frames)
+  def('hero_wind1', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhsssss....
+....hhssssss....
+....hhssksks....
+....hhssssss....
+....hhhsssSs....
+.....hhhhhhS....
+......hhhhh.....
+.ccccckgtttk....
+cccccckttttts...
+ccccccckttttts..
+.cccccckttttts..
+..cgccckttttts..
+.ccwccckbbbbbs..
+cccwccckttttt...
+ccc.ccckttttt...
+.c...kktttttk...
+......TT.TT.....
+......TT.TT.....
+......ll.ll.....
+.....lll.lll....
+.....kkk.kkk....`);
+
+  def('hero_wind2', `
+......hhhh......
+.....hhhhhh.....
+....hhhhhhhh....
+....hhhsssss....
+....hhssssss....
+....hhssksks....
+....hhssssss....
+....hhhsssSs....
+.....hhhhhhS....
+......hhhhh.....
+..cccckgtttk....
+.cccccckttttts..
+ccccccckttttts..
+cccccccktttttts.
+.cgcccckttttts..
+.cwccccckbbbbs..
+ccwcccckttttt...
+cc.ccccckttttt..
+.c...kkktttttk..
+......TT.TT.....
+......TT.TT.....
+......ll.ll.....
+.....lll.lll....
+.....kkk.kkk....`);
+
+  def('shard', `
+...q...
+..qqq..
+.qqeqq.
+qqeeeqq
+.qqeqq.
+..qqq..
+...q...`);
+
+  def('arrow', `
+..........i.
+ppppppppppii
+..........i.`);
+
+  def('cross', `
+...gg...
+...gg...
+.gggggg.
+.gggggg.
+...gg...
+...gg...
+...gg...
+...gg...`);
+
+  // ---------------------------------------------------------------- rasteriser
+  const cache = new Map();
+  const canDoc = typeof document !== 'undefined' && document.createElement;
+
+  function paint(ctx, rows, ox, oy, flip, scale) {
+    const s = scale || PX;
+    const w = rows[0].length;
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      for (let c = 0; c < row.length; c++) {
+        const col = PAL[row[c]];
+        if (!col) continue;
+        const cc = flip ? (w - 1 - c) : c;
+        ctx.fillStyle = col;
+        ctx.fillRect(ox + cc * s, oy + r * s, s, s);
+      }
+    }
+  }
+
+  function frameCanvas(name, flip) {
+    const key = name + (flip ? '|f' : '');
+    let cv = cache.get(key);
+    if (cv) return cv;
+    const rows = MAPS[name];
+    cv = document.createElement('canvas');
+    cv.width = rows[0].length * PX;
+    cv.height = rows.length * PX;
+    paint(cv.getContext('2d'), rows, 0, 0, flip, PX);
+    cache.set(key, cv);
+    return cv;
+  }
+
+  // Draw a sprite with its top-left at (x, y). scale defaults to PX (2).
+  function draw(ctx, name, x, y, flip, scale) {
+    const rows = MAPS[name];
+    if (!rows) return;
+    x = Math.round(x); y = Math.round(y);
+    if (canDoc && (!scale || scale === PX)) {
+      ctx.drawImage(frameCanvas(name, !!flip), x, y);
+    } else {
+      paint(ctx, rows, x, y, !!flip, scale || PX);
+    }
+  }
+
+  function size(name) { const r = MAPS[name]; return { w: r[0].length * PX, h: r.length * PX }; }
+
+  CR.Sprites = { PX, PAL, MAPS, draw, size, paint };
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — keyboard + multi-touch input
+(function (CR) {
+  'use strict';
+  const C = CR.C;
+
+  // On-screen buttons live in the bottom control panel (canvas y 1000–1280).
+  // D-pad cluster on the left thumb, two round action buttons on the right thumb.
+  // Nothing overlaps and nothing leaves the canvas (checked: down ends at 1274, act ends at x 706).
+  const BUTTONS = [
+    { id: 'up',    x: 132, y: 1004, w: 116, h: 86 },
+    { id: 'left',  x: 14,  y: 1098, w: 118, h: 108 },
+    { id: 'right', x: 248, y: 1098, w: 118, h: 108 },
+    { id: 'down',  x: 132, y: 1192, w: 116, h: 82 },
+    { id: 'jump',  x: 390, y: 1094, w: 152, h: 152, label: 'JUMP' },
+    { id: 'act',   x: 554, y: 1010, w: 152, h: 152, label: 'ACT' }
+  ];
+
+  const KEYMAP = {
+    ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+    ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down',
+    Space: 'jump', KeyZ: 'jump', KeyK: 'jump',
+    KeyX: 'act', KeyE: 'act', KeyJ: 'act',
+    Enter: 'start', KeyR: 'start', KeyF: 'forget',
+    Backquote: 'debug', KeyI: 'debug'
+  };
+  const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'act', 'start', 'forget', 'debug'];
+
+  // Exact hit first, then a forgiving 16px halo — so a thumb between two buttons
+  // gets the one it is actually on, not the first one in the list.
+  function buttonAt(x, y) {
+    for (const b of BUTTONS) {
+      if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b.id;
+    }
+    const slop = 16;
+    let best = null, bestD = Infinity;
+    for (const b of BUTTONS) {
+      if (x >= b.x - slop && x <= b.x + b.w + slop && y >= b.y - slop && y <= b.y + b.h + slop) {
+        const d = Math.hypot(x - (b.x + b.w / 2), y - (b.y + b.h / 2));
+        if (d < bestD) { bestD = d; best = b.id; }
+      }
+    }
+    return best;
+  }
+
+  class Input {
+    constructor(canvas) {
+      this.keys = new Set();
+      this.pointers = new Map();
+      this.pointerStarts = new Map(); // Track where each pointer started for swipe detection
+      this.pulses = new Set(); // presses shorter than a frame still register
+      this.swipes = []; // Detected swipe directions
+      this.taps = [];
+      this.prev = {};
+      this.held = {};
+      if (canvas) this.attach(canvas);
+    }
+
+    attach(canvas) {
+      const toCanvas = e => {
+        const r = canvas.getBoundingClientRect();
+        return { x: (e.clientX - r.left) * C.W / r.width, y: (e.clientY - r.top) * C.H / r.height };
+      };
+      window.addEventListener('keydown', e => {
+        const a = KEYMAP[e.code];
+        if (!a) return;
+        e.preventDefault();
+        if (!e.repeat) this.pulses.add(a);
+        this.keys.add(e.code);
+      });
+      window.addEventListener('keyup', e => { this.keys.delete(e.code); });
+      window.addEventListener('blur', () => { this.keys.clear(); this.pointers.clear(); });
+
+      canvas.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        const p = toCanvas(e);
+        this.pointers.set(e.pointerId, p);
+        this.pointerStarts.set(e.pointerId, { x: p.x, y: p.y, t: performance.now() });
+        this.taps.push(p);
+        const b = buttonAt(p.x, p.y);
+        if (b) this.pulses.add(b);
+      });
+      canvas.addEventListener('pointermove', e => {
+        if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, toCanvas(e));
+      });
+      const end = e => {
+        const start = this.pointerStarts.get(e.pointerId);
+        if (start) {
+          const p = this.pointers.get(e.pointerId) || start;
+          const dx = p.x - start.x;
+          const dy = p.y - start.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const elapsed = performance.now() - start.t;
+          // Swipe: >40px movement in <300ms, more horizontal than vertical
+          if (dist > 40 && elapsed < 300 && Math.abs(dx) > Math.abs(dy)) {
+            this.swipes.push(dx > 0 ? 'right' : 'left');
+          }
+          this.pointerStarts.delete(e.pointerId);
+        }
+        this.pointers.delete(e.pointerId);
+      };
+      canvas.addEventListener('pointerup', end);
+      canvas.addEventListener('pointercancel', end);
+      canvas.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    sample() {
+      const h = {};
+      ACTIONS.forEach(a => { h[a] = false; });
+      this.keys.forEach(k => { const a = KEYMAP[k]; if (a) h[a] = true; });
+      this.pointers.forEach(p => { const b = buttonAt(p.x, p.y); if (b) h[b] = true; });
+      // Process swipes as directional inputs
+      for (const swipe of this.swipes) {
+        if (swipe === 'left') h.left = true;
+        if (swipe === 'right') h.right = true;
+      }
+      const pressed = a => (h[a] && !this.prev[a]) || this.pulses.has(a);
+      const out = Object.assign({}, h, {
+        jumpPressed: pressed('jump'), actPressed: pressed('act'),
+        startPressed: pressed('start'), forgetPressed: pressed('forget'), debugPressed: pressed('debug'),
+        taps: this.taps
+      });
+      this.taps = [];
+      this.swipes = [];
+      this.pulses.clear();
+      this.prev = h;
+      this.held = h;
+      return out;
+    }
+  }
+
+  CR.BUTTONS = BUTTONS;
+  CR.buttonAt = buttonAt;
+  CR.Input = Input;
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — game state, physics, interactions, behavior tracking
+// States: title → play → (dead | win[cine → summary]) → rebuild → play → …
+(function (CR) {
+  'use strict';
+  const C = CR.C, M = CR.Memory;
+  const fy = C.floorY;
+  const STEP = 1 / 120; // fixed physics step
+  const REB = C.REBUILD;
+  const ARROW_SPEED = 360;
+  const CINE_DUR = 4.2;   // escape sequence length before the summary fades in
+
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function floorAt(y) { return clamp(Math.round((fy(0) - y) / C.FLOOR_GAP), 0, C.FLOORS - 1); }
+  function overlap(a, b) { return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1; }
+  function playerRect(p, s) {
+    s = s || 0;
+    return { x1: p.x - C.PLAYER_W / 2 + s, x2: p.x + C.PLAYER_W / 2 - s, y1: p.y - C.PLAYER_H + s, y2: p.y - s };
+  }
+  function guardRect(g) {
+    const y = fy(g.floor);
+    return { x1: g.x - C.GUARD_W / 2, x2: g.x + C.GUARD_W / 2, y1: y - C.GUARD_H, y2: y };
+  }
+  function inRect(t, r) { return t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h; }
+
+  class Game {
+    constructor(storage) {
+      this.storage = storage;
+      this.mem = M.load(storage);
+      this.state = 'title';
+      this.clock = 0;
+      this.acc = 0;
+      this.level = null;
+      this.player = null;
+      this.plan = null;
+      this.validation = null;
+      this.whisperQueue = [];
+      this.whisper = null;
+      this.hintMsg = null;
+      this.events = [];
+      this.debug = false;
+      this.observation = null;
+      this.rebuildT = 0;
+      this.assembleT = 0;
+      this.arrows = [];
+      this.eruptions = [];
+      this.prompt = null;
+      this.winPhase = null;
+      this.camY = C.WORLD_H - C.VIEW_H;
+      // feel: screen shake, damage flash, pixel particles (all purely cosmetic, never touch physics)
+      this.shakeT = 0; this.shakeMag = 0; this.flash = 0; this.particles = [];
+      if (CR.Sound) CR.Sound.ambient(true); // wind + torch crackle; starts on the first gesture
+    }
+
+    // ---------------------------------------------------------------- feel (cosmetic only)
+    shake(mag, dur) { this.shakeMag = Math.max(this.shakeMag, mag); this.shakeT = Math.max(this.shakeT, dur); }
+    shakeOffset() {
+      if (this.shakeT <= 0) return { x: 0, y: 0 };
+      const m = this.shakeMag * Math.min(1, this.shakeT / 0.25); // eases out over the last 0.25 s
+      return { x: Math.round((Math.random() * 2 - 1) * m), y: Math.round((Math.random() * 2 - 1) * m) };
+    }
+    burst(x, y, kind, n) {
+      const K = kind === 'shard'
+        ? { c: ['#7fe8ff', '#ffffff', '#bff4ff', '#e8c064'], g: -160, v: 120, life: 0.9, s: 4, lift: 50 }
+        : { c: ['#8a8496', '#5e5870', '#b3aabb'], g: 420, v: 110, life: 0.5, s: 3, lift: 60 };
+      for (let i = 0; i < n && this.particles.length < 240; i++) {
+        const a = Math.random() * Math.PI * 2, sp = K.v * (0.35 + Math.random() * 0.8);
+        this.particles.push({ kind, x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - K.lift, g: K.g, t: 0,
+          life: K.life * (0.7 + Math.random() * 0.6), s: K.s * (0.6 + Math.random() * 0.8), c: K.c[i % K.c.length] });
+      }
+    }
+    updateFx(dt) {
+      if (this.shakeT > 0) { this.shakeT -= dt; if (this.shakeT <= 0) { this.shakeT = 0; this.shakeMag = 0; } }
+      if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2.5);
+      for (const p of this.particles) {
+        p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.max(0, 1 - 1.8 * dt);
+      }
+      if (this.particles.length) this.particles = this.particles.filter(p => p.t < p.life);
+    }
+    // music intensity follows how hard the castle is pushing (sum of adaptation tiers, 0..18)
+    musicIntensity() {
+      const T = (this.plan && this.plan.tiers) || {};
+      const sum = Object.keys(T).reduce((a, k) => a + (T[k] || 0), 0);
+      return Math.min(1, 0.25 + sum / 14);
+    }
+
+    // ---------------------------------------------------------------- castle construction
+    // Builds the next castle from memory. If the validator ever rejects it (it should not),
+    // fall back to the neutral castle so the player is never handed an impossible layout.
+    buildCastle() {
+      this.plan = M.buildPlan(this.mem);
+      let level = CR.buildLevel(this.plan);
+      let v = CR.validateLevel(level);
+      if (!v.ok) {
+        if (typeof console !== 'undefined') console.warn('Castle rejected by validator, using neutral layout:', v.problems);
+        const safePlan = M.buildPlan(M.defaultModel());
+        safePlan.fallback = true;
+        safePlan.notes = this.plan.notes;
+        this.plan = safePlan;
+        level = CR.buildLevel(safePlan);
+        v = CR.validateLevel(level);
+      }
+      this.level = level;
+      this.validation = v;
+      this.observation = M.describeObservation(this.mem, this.plan);
+      this.events.push('built');
+    }
+
+    // ---------------------------------------------------------------- run lifecycle
+    startRun(prebuilt) {
+      if (!prebuilt || !this.level) this.buildCastle();
+      const L = this.level;
+      this.player = { x: L.start.x, y: fy(L.start.floor), vx: 0, vy: 0, onGround: true, climbing: null, face: 1, anim: 0, dead: false, act: 0 };
+      this.stats = M.newRunStats();
+      this.stats.chestsAvail = L.chests.length;
+      this.runTime = 0;
+      this.acc = 0;
+      this.visited = { 0: true };
+      this.eruptions = [];
+      this.arrows = [];
+      this.prompt = null;
+      this.whisperQueue = [];
+      this.whisper = null;
+      this.hintMsg = null;
+      this.runNumber = this.mem.runs + 1;
+      this.state = 'play';
+      this.winPhase = null;
+      this.camY = this.cameraTarget();
+      this.particles = []; this.shakeT = 0; this.shakeMag = 0; this.flash = 0;
+      CR.Sound.play('runStart');
+      CR.Sound.music.start({ intensity: this.musicIntensity(), seed: this.runNumber });
+      if (!this.plan.first) {
+        const n = this.mem.runs;
+        this.queueWhisper('THE CASTLE REMEMBERS', `…it has watched you ${n} time${n === 1 ? '' : 's'}.`);
+        (L.whispers[0] || []).forEach(w => this.queueWhisper('THE CASTLE REMEMBERS', w));
+      }
+      this.events.push('start');
+    }
+
+    endRun(outcome, cause, causeCat) {
+      if (this.state !== 'play') return;
+      const S = this.stats, L = this.level;
+      S.outcome = outcome;
+      S.cause = cause || null;
+      S.causeCat = causeCat || null;
+      S.time = this.runTime;
+      S.chestsSkipped = L.chests.filter(c => !c.opened && this.visited[c.floor]).length;
+      if (outcome !== 'win') S.deathFloor = floorAt(this.player.y);
+      this.lastStats = Object.assign({}, S);
+      this.lastPace = M.classifyPace(S);
+      this.lastIdleRatio = M.idleRatio(S);
+      this.mem = M.mergeRun(this.mem, S);
+      M.save(this.storage, this.mem);
+      this.nextPlan = M.buildPlan(this.mem);
+      this.state = outcome === 'win' ? 'win' : 'dead';
+      this.winPhase = outcome === 'win' ? 'cine' : null;
+      CR.Sound.music.stop(outcome === 'win' ? 0.3 : 0.8);
+      if (outcome !== 'win') {
+        this.player.dead = true;
+        CR.Sound.play('death');
+        this.shake(11, 0.45);
+        this.flash = 1;
+        this.burst(this.player.x, this.player.y - 20, 'dust', 12);
+      } else {
+        CR.Sound.play('escape');
+      }
+      this.endT = 0;
+      this.summaryT = 0;
+      this.whisperQueue = [];
+      this.whisper = null;
+      this.prompt = null;
+      this.events.push(outcome);
+    }
+
+    die(cause, causeCat) { this.endRun('dead', cause, causeCat); }
+
+    // The reconstruction transition: observe → reconstruct → assemble the new castle.
+    beginRebuild() {
+      this.buildCastle();
+      this.state = 'rebuild';
+      this.rebuildT = 0;
+      this.assembleT = 0;
+      this.player = null;
+      this.eruptions = [];
+      this.arrows = [];
+      this.particles = [];
+      this.camY = C.WORLD_H - C.VIEW_H;
+      this.rebuildSfx = 0; // 0 → 'remember' played, 1 → 'rebuild' played
+      CR.Sound.play('remember');
+      this.rebuildSfx = 1;
+      this.events.push('rebuild');
+    }
+
+    forget() {
+      this.mem = M.reset(this.storage);
+      this.queueWhisper('THE CASTLE FORGETS', '…for now.');
+    }
+
+    // ---------------------------------------------------------------- messages
+    queueWhisper(title, sub) { this.whisperQueue.push({ title, sub, t: 0, dur: 3.4 }); }
+    hint(text) { if (!this.hintMsg || this.hintMsg.text !== text) this.hintMsg = { text, t: 0 }; }
+
+    updateMessages(dt) {
+      if (!this.whisper && this.whisperQueue.length) this.whisper = this.whisperQueue.shift();
+      if (this.whisper) {
+        this.whisper.t += dt;
+        if (this.whisper.t >= this.whisper.dur) this.whisper = null;
+      }
+      if (this.hintMsg) {
+        this.hintMsg.t += dt;
+        if (this.hintMsg.t > 2.2) this.hintMsg = null;
+      }
+    }
+
+    // ---------------------------------------------------------------- main update
+    update(dt, input) {
+      dt = Math.min(dt, 0.1);
+      this.clock += dt;
+      this.updateMessages(dt);
+      this.updateFx(dt);
+
+      // Debug overlay toggle: key, or a tap on the DBG pill (consumed so it never restarts a run).
+      let taps = input.taps || [];
+      const dbgTaps = taps.filter(t => inRect(t, C.DEBUG_BTN));
+      if (input.debugPressed || dbgTaps.length) this.debug = !this.debug;
+      if (dbgTaps.length) taps = taps.filter(t => !inRect(t, C.DEBUG_BTN));
+      const anyPress = input.startPressed || input.jumpPressed || input.actPressed || taps.length > 0;
+
+      if (this.state === 'title') {
+        if (input.forgetPressed && this.mem.runs > 0) { this.forget(); return; }
+        for (const t of taps) {
+          if (this.mem.runs > 0 && inRect(t, C.FORGET)) { this.forget(); return; }
+        }
+        if (anyPress) this.startRun(false);
+        return;
+      }
+
+      if (this.state === 'rebuild') {
+        this.rebuildT += dt;
+        if (anyPress && this.rebuildT > REB.skipAfter && this.rebuildT < REB.assembleAt) this.rebuildT = REB.assembleAt;
+        this.assembleT = Math.max(0, this.rebuildT - REB.assembleAt);
+        if (this.rebuildSfx === 1 && this.rebuildT >= REB.reconAt) { this.rebuildSfx = 2; CR.Sound.play('rebuild'); }
+        if (this.assembleT > 0 && this.assembleT < 1.2) this.shake(2, 0.05); // stone settling as floors slide in
+        if (this.rebuildT >= REB.total) this.startRun(true);
+        return;
+      }
+
+      if (this.state === 'play') {
+        const inp = Object.assign({}, input);
+        this.acc += dt;
+        while (this.acc >= STEP && this.state === 'play') {
+          this.step(STEP, inp);
+          inp.jumpPressed = false; // edge presses apply once per frame
+          inp.actPressed = false;
+          this.acc -= STEP;
+        }
+      } else if (this.state === 'win') {
+        this.endT += dt;
+        if (this.winPhase === 'cine') {
+          if (this.endT >= CINE_DUR || (anyPress && this.endT > 0.5)) { this.winPhase = 'summary'; this.summaryT = 0; }
+        } else {
+          this.summaryT += dt;
+          if (this.summaryT > 0.6 && anyPress) { this.beginRebuild(); return; }
+        }
+      } else { // dead
+        this.endT += dt;
+        if (this.endT > 0.6 && anyPress) { this.beginRebuild(); return; }
+      }
+      const target = this.cameraTarget();
+      this.camY += (target - this.camY) * Math.min(1, dt * 6);
+    }
+
+    cameraTarget() {
+      if (!this.player) return C.WORLD_H - C.VIEW_H;
+      return clamp(this.player.y - C.VIEW_H * 0.62, 0, C.WORLD_H - C.VIEW_H);
+    }
+
+    // ---------------------------------------------------------------- one physics step
+    step(dt, inp) {
+      const p = this.player, L = this.level, S = this.stats;
+      this.runTime += dt;
+      S.time = this.runTime;
+      const mx = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+      let active = false;
+      if (p.act > 0) p.act -= dt;
+
+      if (p.climbing) {
+        const lad = p.climbing, topY = fy(lad.top), botY = fy(lad.bottom);
+        const my = (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
+        if (my) { p.y += my * C.CLIMB_SPEED * dt; p.anim += dt; active = true; if (my) CR.Sound.play('climb'); }
+        if (p.y <= topY) this.leaveLadder(topY);
+        else if (p.y >= botY) this.leaveLadder(botY);
+        else if (mx) {
+          for (const f of L.floors) {
+            if (Math.abs(p.y - f.y) < 10) { this.leaveLadder(f.y); break; }
+          }
+        }
+      } else if (inp.up || inp.down) {
+        const lad = this.findLadder(inp.up ? 'up' : 'down');
+        if (lad) { p.climbing = lad; p.x = lad.x; p.vx = 0; p.vy = 0; p.onGround = false; }
+      }
+
+      if (!p.climbing) {
+        p.vx = mx * C.MOVE_SPEED;
+        if (mx) { p.face = mx; p.anim += dt; active = true; if (p.onGround) CR.Sound.play('step'); }
+        if (inp.jumpPressed && p.onGround) { p.vy = -C.JUMP_V; p.onGround = false; CR.Sound.play('jump'); }
+        const px = p.x;
+        p.x = this.resolveX(px, px + p.vx * dt);
+        this.trackDoors(px, p.x);
+        const py = p.y;
+        p.vy = Math.min(p.vy + C.GRAVITY * dt, 1400);
+        p.y += p.vy * dt;
+        p.onGround = false;
+        if (p.vy >= 0) {
+          for (const f of L.floors) {
+            if (py <= f.y + 0.01 && p.y >= f.y) {
+              p.y = f.y; p.vy = 0; p.onGround = true;
+              if (py < f.y - 10) { CR.Sound.play('land'); this.burst(p.x, p.y - 2, 'dust', 5); }
+              break;
+            }
+          }
+        }
+        if (!p.onGround) active = true;
+      }
+
+      if (!active) S.idle += dt;
+      if (inp.actPressed) this.interact();
+      this.updateWorld(dt);
+      if (this.state === 'play') this.updatePrompt();
+    }
+
+    leaveLadder(y) {
+      const p = this.player;
+      p.y = y; p.climbing = null; p.onGround = true; p.vy = 0;
+    }
+
+    gateOf(id) { return this.level.gates.find(g => g.id === id); }
+
+    findLadder(dir) {
+      const p = this.player;
+      let blocked = false;
+      for (const lad of this.level.ladders) {
+        if (Math.abs(p.x - lad.x) > 18) continue;
+        const topY = fy(lad.top), botY = fy(lad.bottom);
+        const fits = dir === 'up' ? (p.y > topY + 1 && p.y <= botY + 1) : (p.y >= topY - 1 && p.y < botY - 1);
+        if (!fits) continue;
+        if (lad.gate && !this.gateOf(lad.gate).open) { blocked = true; continue; }
+        return lad;
+      }
+      if (blocked) this.hint('The gate is shut. Find a lever.');
+      return null;
+    }
+
+    resolveX(px, nx) {
+      const p = this.player, hw = C.PLAYER_W / 2;
+      nx = clamp(nx, C.WALL_L + hw, C.WALL_R - hw);
+      for (const d of this.level.doors) {
+        if (d.open) continue;
+        const f = fy(d.floor);
+        if (!(p.y > f - C.FLOOR_GAP + 20 && p.y <= f + 0.5)) continue;
+        const dl = d.x - C.DOOR_W / 2, dr = d.x + C.DOOR_W / 2;
+        if (px <= d.x && nx + hw > dl) nx = dl - hw;
+        else if (px > d.x && nx - hw < dr) nx = dr + hw;
+      }
+      return nx;
+    }
+
+    trackDoors(px, nx) {
+      const p = this.player;
+      for (const d of this.level.doors) {
+        if (!d.open || d.passed) continue;
+        if (Math.abs(p.y - fy(d.floor)) > 150) continue;
+        if ((px < d.x) !== (nx < d.x)) {
+          d.passed = true;
+          if (d.side === 'L') this.stats.doorL++; else this.stats.doorR++;
+          CR.Sound.play('door');
+          this.events.push('door-' + d.side);
+        }
+      }
+    }
+
+    // What ACT would do right now (drives the "E" prompt bubble).
+    updatePrompt() {
+      const p = this.player, L = this.level;
+      this.prompt = null;
+      if (p.climbing) return;
+      const f = floorAt(p.y);
+      if (Math.abs(p.y - fy(f)) > 30) return;
+      for (const g of L.guards) {
+        if (g.floor !== f || g.stun > 0) continue;
+        const ahead = (g.x - p.x) * p.face;
+        if (ahead > -6 && ahead < C.SHOVE_R) { this.prompt = { x: g.x, y: fy(f) - C.GUARD_H - 14, kind: 'shove' }; return; }
+      }
+      for (const v of L.levers) {
+        if (v.floor === f && Math.abs(v.x - p.x) < C.INTERACT_R && v.state === 'idle') { this.prompt = { x: v.x, y: fy(f) - 52, kind: 'pull' }; return; }
+      }
+      for (const c of L.chests) {
+        if (c.floor === f && !c.opened && Math.abs(c.x - p.x) < 30) { this.prompt = { x: c.x, y: fy(f) - 40, kind: 'open' }; return; }
+      }
+      for (const d of L.doors) {
+        if (d.floor === f && !d.open && Math.abs(d.x - p.x) < C.INTERACT_R) { this.prompt = { x: d.x, y: fy(f) - C.DOOR_H - 16, kind: d.locked ? 'sealed' : 'open' }; return; }
+      }
+    }
+
+    // ---------------------------------------------------------------- ACT button
+    interact() {
+      const p = this.player, L = this.level;
+      if (p.climbing) return;
+      const f = floorAt(p.y);
+      p.act = 0.3;
+      for (const g of L.guards) {
+        if (g.floor !== f || g.stun > 0) continue;
+        const ahead = (g.x - p.x) * p.face;
+        if (ahead > -6 && ahead < C.SHOVE_R && Math.abs(p.y - fy(g.floor)) < 60) { this.shove(g); return; }
+      }
+      for (const v of L.levers) {
+        if (v.floor === f && Math.abs(v.x - p.x) < C.INTERACT_R) { this.pullLever(v); return; }
+      }
+      for (const c of L.chests) {
+        if (c.floor === f && Math.abs(c.x - p.x) < 30) { this.openChest(c); return; }
+      }
+      for (const d of L.doors) {
+        if (d.floor === f && !d.open && Math.abs(d.x - p.x) < C.INTERACT_R) {
+          if (d.locked) { CR.Sound.play('doorLocked'); this.shake(3, 0.12); this.hint('Bricked up. The castle closed this way.'); this.events.push('locked-' + d.id); return; }
+          d.open = true;
+          CR.Sound.play('door');
+          this.events.push('open-' + d.id);
+          return;
+        }
+      }
+    }
+
+    shove(g) {
+      const p = this.player;
+      const armored = g.armor > 0;
+      if (armored) {
+        g.armor--;
+        g.stun = 0.6;
+        g.x = clamp(g.x + p.face * 44, g.min, g.max);
+        this.hint('The heavy braces. Again!');
+      } else {
+        g.stun = g.stunTime;
+        g.x = clamp(g.x + p.face * 20, g.min, g.max);
+      }
+      g.alarm = 0;
+      g.shootT = 0;
+      if (!g.confronted) { g.confronted = true; this.stats.confronted++; }
+      g.counted = true;
+      CR.Sound.play(armored ? 'shoveArmor' : 'shove');
+      this.shake(armored ? 7 : 5, 0.22);
+      this.burst(g.x, fy(g.floor) - 24, 'dust', 7);
+      this.events.push('shove');
+    }
+
+    erupt(floor, x, cause, cat, whisper) {
+      CR.Sound.play('trapWarn'); // the 0.55 s tell: three ticks before the spikes come up
+      this.eruptions.push({ floor, x1: x - 80, x2: x + 80, warn: 0.55, active: 1.6, t: 0, cause, cat, fired: false });
+      this.whisperQueue.unshift({ title: 'THE CASTLE REMEMBERS', sub: whisper, t: 0, dur: 2.6 });
+      this.whisper = null;
+    }
+
+    pullLever(v) {
+      const gate = this.gateOf(v.gate), S = this.stats;
+      if (v.state === 'sprung') { this.hint('It is jammed.'); return; }
+      if (gate.open) { this.hint('The gate is already open.'); return; }
+      S.leversPulled++;
+      if (v.side === 'L') S.leverL++; else S.leverR++;
+      switch (v.effect) {
+        case 'trap':
+          v.state = 'sprung';
+          S.traps++;
+          CR.Sound.play('leverTrap'); // lever + spring release
+          this.erupt(v.floor, v.x, 'The lever you trusted was a trap.', 'lever', '…your hand. RUN.');
+          this.events.push('lever-trap');
+          return;
+        case 'dud':
+          v.state = 'sprung';
+          CR.Sound.play('leverDud');
+          this.hint('It turns. Nothing happens. Try the other one.');
+          this.events.push('lever-dud');
+          return;
+        case 'alarm':
+          CR.Sound.play('lever');
+          this.level.guards.forEach(g => { if (g.floor === v.floor) { g.alarm = 4; g.stun = 0; } });
+          this.hint('The gate opens. The guard heard it.');
+          CR.Sound.play('alarm');
+          this.events.push('lever-alarm');
+          break;
+        default:
+          CR.Sound.play('lever');
+          break;
+      }
+      v.state = 'pulled';
+      gate.open = true;
+      gate.openT = 0;
+      CR.Sound.play('gateOpen');
+      this.shake(3, 0.3);
+      this.events.push('gate-' + gate.id);
+    }
+
+    openChest(c) {
+      const S = this.stats;
+      if (c.opened) { this.hint('Empty.'); return; }
+      c.opened = true;
+      S.chests++;
+      CR.Sound.play('chest'); // lid creak
+      if (c.trapped) {
+        S.traps++;
+        this.erupt(c.floor, c.x, 'The chest was a trap.', 'chest', '…greedy hands. RUN.');
+        this.events.push('chest-trap');
+        return;
+      }
+      S.shards++;
+      CR.Sound.play('shard');
+      this.burst(c.x, fy(c.floor) - 18, 'shard', 18);
+      this.hint('A memory shard, left for you.');
+      this.events.push('chest');
+    }
+
+    // ---------------------------------------------------------------- world
+    updateWorld(dt) {
+      const p = this.player, L = this.level, S = this.stats;
+      const pf = floorAt(p.y);
+      const onFloorLevel = Math.abs(p.y - fy(pf)) < 80;
+
+      for (const gate of L.gates) {
+        if (!gate.open) continue;
+        gate.openT += dt;
+        if (gate.autoClose && gate.openT >= gate.autoClose && !(p.climbing && p.climbing.gate === gate.id)) {
+          gate.open = false;
+          L.levers.forEach(v => { if (v.gate === gate.id && v.state === 'pulled') v.state = 'idle'; });
+          CR.Sound.play('gateClose');
+          this.shake(6, 0.25);
+          this.burst(gate.x, fy(gate.floor) - 4, 'dust', 8);
+          this.hint('The gate slams shut. The castle will not wait.');
+        }
+      }
+
+      for (const g of L.guards) {
+        if (g.stun > 0) {
+          g.stun -= dt;
+          // A guard cannot get up while you are standing on it: it stays down until you step away.
+          if (g.stun <= 0 && overlap(playerRect(p, 3), guardRect(g))) g.stun = 0.2;
+          continue;
+        }
+        g.alert = false;
+        if (g.alarm > 0) g.alarm -= dt;
+        const sameFloor = pf === g.floor && onFloorLevel && !p.climbing;
+        if (g.ranged) {
+          // Archer: holds its post, turns toward you, looses an arrow every few seconds.
+          if (sameFloor) {
+            const d = Math.sign(p.x - g.x);
+            if (d) g.dir = d;
+            g.alert = Math.abs(p.x - g.x) < 460;
+          }
+          g.shootT += dt;
+          if (sameFloor && g.alert && g.shootT >= g.cooldown) {
+            g.shootT = 0;
+            CR.Sound.play('arrow');
+            this.arrows.push({ floor: g.floor, x: g.x + g.dir * 18, dir: g.dir, from: g.id, origin: g.origin });
+            this.events.push('arrow');
+          }
+        } else {
+          let sp = g.speed;
+          const chasing = (g.watch || g.alarm > 0) && sameFloor && Math.abs(p.x - g.x) < (g.alarm > 0 ? 400 : 170);
+          if (chasing) {
+            const d = Math.sign(p.x - g.x);
+            if (d) g.dir = d;
+            sp *= g.alarm > 0 ? 1.6 : 1.4;
+            if (!g.chasing) CR.Sound.play('guardAlert'); // short horn the moment he notices you
+            g.alert = true;
+          }
+          g.chasing = chasing; // edge flag for the horn (g.alert is reset every step above)
+          g.x += g.dir * sp * dt;
+          if (g.x < g.min) { g.x = g.min; g.dir = 1; } else if (g.x > g.max) { g.x = g.max; g.dir = -1; }
+        }
+        if (overlap(playerRect(p, 3), guardRect(g))) {
+          const cat = g.origin === 'door' || g.origin === 'pace' ? g.origin : 'guard';
+          this.die('A guard caught you.', cat);
+          return;
+        }
+        // "Avoided" = got past a guard without shoving it.
+        if (pf === g.floor && Math.abs(p.y - fy(g.floor)) < 130) {
+          const s = Math.sign(p.x - g.x);
+          if (!g.counted && s && g.lastSide && s !== g.lastSide) { g.counted = true; S.avoided++; this.events.push('avoid'); }
+          if (s) g.lastSide = s;
+        } else {
+          g.lastSide = 0;
+        }
+      }
+
+      // Arrows fly at knee height: jump them, or be on a ladder.
+      for (const a of this.arrows) {
+        a.x += a.dir * ARROW_SPEED * dt;
+        if (a.x < C.WALL_L + 4 || a.x > C.WALL_R - 4) { a.dead = true; CR.Sound.play('arrowHitWall', { vol: 0.7 }); continue; }
+        if (a.floor !== pf || p.climbing) continue;
+        const y = fy(a.floor);
+        const ar = { x1: a.x - 12, x2: a.x + 12, y1: y - 26, y2: y - 12 };
+        if (overlap(playerRect(p, 2), ar)) {
+          a.dead = true;
+          this.die('An arrow.', a.origin === 'pace' ? 'pace' : 'guard');
+          return;
+        }
+      }
+      this.arrows = this.arrows.filter(a => !a.dead);
+
+      for (const s of L.spikes) {
+        s.active = !s.retract || ((this.runTime + s.phase) % s.period) < s.on;
+        if (!s.active || p.climbing) continue;
+        const y = fy(s.floor);
+        if (p.x + C.PLAYER_W / 2 - 4 > s.x && p.x - C.PLAYER_W / 2 + 4 < s.x + s.w && p.y > y - 14 && p.y <= y + 1) {
+          S.traps++;
+          CR.Sound.play('spikes');
+          const cat = s.origin === 'door' || s.origin === 'pace' ? s.origin : 'trap';
+          this.die('Spikes.', cat);
+          return;
+        }
+      }
+
+      for (const e of this.eruptions) {
+        e.t += dt;
+        if (e.t > e.warn && e.t < e.warn + e.active) {
+          const y = fy(e.floor);
+          if (!e.fired) { // the spikes come up: one crunch, one jolt, a spray of stone chips
+            e.fired = true;
+            CR.Sound.play('spikes');
+            this.shake(7, 0.3);
+            this.burst((e.x1 + e.x2) / 2, y - 6, 'dust', 14);
+          }
+          if (!p.climbing && p.x + 9 > e.x1 && p.x - 9 < e.x2 && p.y > y - 40 && p.y <= y + 1) {
+            this.die(e.cause, e.cat);
+            return;
+          }
+        }
+      }
+      this.eruptions = this.eruptions.filter(e => e.t < e.warn + e.active);
+
+      for (const sh of L.shards) {
+        if (sh.collected) continue;
+        const y = fy(sh.floor) - 60;
+        if (Math.abs(p.x - sh.x) < 24 && p.y > y - 10 && p.y - C.PLAYER_H < y + 12) {
+          sh.collected = true;
+          S.shards++;
+          CR.Sound.play('shard');
+          this.burst(sh.x, y, 'shard', 22);
+          this.hint('A memory shard. The castle let you have this one.');
+        }
+      }
+
+      const ex = L.exit;
+      if (pf === ex.floor && Math.abs(p.x - ex.x) < ex.w / 2 && Math.abs(p.y - fy(ex.floor)) < 30) {
+        this.endRun('win');
+        return;
+      }
+
+      if (p.onGround) {
+        S.maxFloor = Math.max(S.maxFloor, pf);
+        if (!this.visited[pf]) {
+          this.visited[pf] = true;
+          CR.Sound.play('floorUp'); // two rising bells: a new floor reached
+          (L.whispers[pf] || []).forEach(w => this.queueWhisper('THE CASTLE REMEMBERS', w));
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------- debug overlay data
+    debugInfo() {
+      const m = this.mem, S = this.stats, V = this.level ? this.validation : null;
+      const P = this.plan && this.level ? this.plan : M.buildPlan(m); // on the title screen: the castle that WOULD be built
+      const f1 = v => (Math.round(v * 10) / 10).toFixed(1);
+      const side = s => (s === 'L' ? 'LEFT' : s === 'R' ? 'RIGHT' : '—');
+      const lines = [];
+      lines.push(`STORED MODEL  runs ${m.runs} · escapes ${m.completions} · falls ${m.deaths} · streak ${m.streak}`);
+      lines.push(`door   L ${f1(m.doorL)}  R ${f1(m.doorR)}   → ${side(M.favored(m.doorL, m.doorR))}`);
+      lines.push(`lever  L ${f1(m.leverL)}  R ${f1(m.leverR)}   → ${side(M.favored(m.leverL, m.leverR))}   pulled ${f1(m.leversPulled)}`);
+      lines.push(`pace   rush ${f1(m.rush)}  wait ${f1(m.wait)}   → ${m.rush > m.wait ? 'RUSH' : m.wait > m.rush ? 'WAIT' : '—'}`);
+      lines.push(`guard  shoved ${f1(m.confronted)}  slipped ${f1(m.avoided)}   → ${m.confronted - m.avoided >= 0.9 ? 'BRACE' : m.avoided - m.confronted >= 0.9 ? 'WATCH' : '—'}`);
+      lines.push(`traps  ${f1(m.traps)}   chests opened ${f1(m.chests)}  skipped ${f1(m.chestsSkipped)}   → ${M.greedy(m) ? 'GREEDY' : '—'}`);
+      lines.push(`pressure  ${M.CATS.map(c => `${c} ${m.pressure[c]}`).join(' · ')}`);
+      lines.push(`deaths by ${M.CATS.map(c => `${c} ${m.causes[c]}`).join(' · ')}`);
+      if (m.last) lines.push(`last run  ${m.last.outcome}${m.last.causeCat ? ' (' + m.last.causeCat + ')' : ''} · ${Number(m.last.time).toFixed(1)}s · ${m.last.pace} ${m.last.idle}% idle`);
+      lines.push('');
+      if (P) {
+        lines.push(`${this.level ? 'THIS CASTLE' : 'NEXT CASTLE'}${P.first ? '  (first run: neutral)' : ''}${P.fallback ? '  FALLBACK LAYOUT' : ''}`);
+        lines.push(`tiers  door ${P.tiers.door} ${side(P.doorPref)} · lever ${P.tiers.lever} ${side(P.leverPref)} · pace ${P.tiers.pace} ${P.paceMode || '—'} · guard ${P.tiers.guard} ${P.guardMode || '—'} · trap ${P.tiers.trap} · chest ${P.tiers.chest}`);
+        lines.push(`levers  F2 L:${P.levers[1].L} R:${P.levers[1].R}   F4 L:${P.levers[3].L} R:${P.levers[3].R}   gate close ${P.gateClose || 'never'}`);
+        lines.push(`chests  ${[0, 1, 2, 3].map(f => `F${f + 1}:${P.chests[f]}`).join(' ')}   exit ${side(P.exitSide)} · exit guards ${P.exitGuards}`);
+        if (this.level) {
+          [0, 1, 2, 3, 4].forEach(f => lines.push(`F${f + 1} ${this.level.modules[f]}`));
+          lines.push(`guards  ${this.level.guards.map(g => `${g.id}:${g.type}${g.armor ? '+armor' : ''}`).join(' ')}`);
+        }
+        if (V) lines.push(`validated ${V.ok ? 'OK' : 'FAIL ' + V.problems.join('; ')}${V.route ? ' · path ' + V.route : ''}`);
+      }
+      if (S && this.state === 'play') {
+        lines.push('');
+        lines.push(`THIS RUN  ${this.runTime.toFixed(1)}s · idle ${Math.round(M.idleRatio(S) * 100)}% (${M.classifyPace(S)}) · floor ${floorAt(this.player.y) + 1}`);
+        lines.push(`doors L${S.doorL} R${S.doorR} · levers L${S.leverL} R${S.leverR} · shoved ${S.confronted} · slipped ${S.avoided} · traps ${S.traps} · chests ${S.chests}/${S.chestsAvail} · shards ${S.shards}`);
+      }
+      return lines;
+    }
+  }
+
+  CR.floorAt = floorAt;
+  CR.CINE_DUR = CINE_DUR;
+  CR.Game = Game;
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — renderer (Visigothic pixel look, all procedural)
+(function (CR) {
+  'use strict';
+  const C = CR.C, M = CR.Memory, SP = CR.Sprites, P = SP.PAL;
+  const fy = C.floorY;
+  const REB = C.REBUILD;
+  const FONT = '"Courier New", Courier, monospace';
+  const COL = {
+    bg: '#0b0910', text: '#efe4c8', dim: '#9a8f9c', gold: '#e8c064', danger: '#ff5a4a',
+    whisper: '200,180,255', debug: '#9fe3a5',
+    mortar: '#20232c', brick: '#343849', brickD: '#2b2f3e', brickL: '#3d4254', outer: '#1b1d26',
+    slab: '#4a4e60', slabTop: '#6b7085', slabDark: '#22242e', seam: '#2c2f3c',
+    ladder: '#8c6a3f', ladderD: '#4a3219', ladderLong: '#c9a04c',
+    gate: '#8b8f99', gateD: '#4e535f'
+  };
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const spaced = s => s.split('').join(' ');
+  const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) ^ 0x5bd1e995; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+
+  function rrect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function text(ctx, str, x, y, size, color, align, weight) {
+    ctx.font = `${weight || 'bold'} ${size}px ${FONT}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align || 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(str, x, y);
+  }
+  function shadowText(ctx, str, x, y, size, color, align, weight) {
+    text(ctx, str, x + 3, y + 3, size, 'rgba(0,0,0,0.6)', align, weight);
+    text(ctx, str, x, y, size, color, align, weight);
+  }
+  function wrap(ctx, str, x, y, maxW, lh, size, color, align, weight) {
+    ctx.font = `${weight || 'normal'} ${size}px ${FONT}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align || 'left';
+    ctx.textBaseline = 'middle';
+    let line = '';
+    for (const w of String(str).split(' ')) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y); y += lh; line = w; } else line = test;
+    }
+    if (line) { ctx.fillText(line, x, y); y += lh; }
+    return y;
+  }
+  const rect = (ctx, x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+  const sprite = (ctx, name, x, y, flip, scale) => SP.draw(ctx, name, x, y, flip, scale);
+
+  // ---------------------------------------------------------------- static backdrop (cached per level)
+  let bgCanvas = null, bgTag = null;
+  const canDoc = typeof document !== 'undefined' && document.createElement;
+
+  function bricks(ctx, x0, y0, w, h, seed) {
+    rect(ctx, x0, y0, w, h, COL.mortar);
+    for (let y = y0, r = 0; y < y0 + h; y += 12, r++) {
+      const off = r % 2 ? 14 : 0;
+      for (let x = x0 - off; x < x0 + w; x += 28) {
+        const v = hash(x + seed, y);
+        const bx = Math.max(x0, x + 2), bw = Math.min(x0 + w, x + 26) - bx;
+        if (bw <= 0) continue;
+        rect(ctx, bx, y + 2, bw, Math.min(8, y0 + h - y - 2), v < 0.12 ? COL.brickD : v > 0.9 ? COL.brickL : COL.brick);
+      }
+    }
+  }
+
+  function drawFloorSlab(ctx, y) {
+    rect(ctx, 0, y, C.W, 22, COL.slab);
+    rect(ctx, 0, y, C.W, 4, COL.slabTop);
+    rect(ctx, 0, y + 18, C.W, 4, COL.slabDark);
+    for (let x = 24; x < C.W; x += 48) rect(ctx, x + Math.floor(hash(x, y) * 6) * 2, y + 4, 2, 14, COL.seam);
+    // shadow under the ceiling and above the slab
+    const g = ctx.createLinearGradient(0, y - 40, 0, y);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = g; ctx.fillRect(0, y - 40, C.W, 40);
+    const g2 = ctx.createLinearGradient(0, y + 22, 0, y + 60);
+    g2.addColorStop(0, 'rgba(0,0,0,0.5)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g2; ctx.fillRect(0, y + 22, C.W, 38);
+  }
+
+  function drawLadderStatic(ctx, l) {
+    const top = fy(l.top) - 26, bot = fy(l.bottom);
+    const rail = l.long ? COL.ladderLong : COL.ladder;
+    rect(ctx, l.x - 16, top, 6, bot - top, COL.ladderD);
+    rect(ctx, l.x - 14, top, 2, bot - top, rail);
+    rect(ctx, l.x + 10, top, 6, bot - top, COL.ladderD);
+    rect(ctx, l.x + 12, top, 2, bot - top, rail);
+    for (let y = bot - 14; y > top + 4; y -= 18) {
+      rect(ctx, l.x - 12, y, 24, 4, COL.ladderD);
+      rect(ctx, l.x - 12, y, 24, 2, rail);
+    }
+  }
+
+  function drawDoorFrame(ctx, d) {
+    const y = fy(d.floor), ceil = y - C.FLOOR_GAP + 22;
+    // pillar above the arch, then the horseshoe arch cap, then jambs
+    rect(ctx, d.x - 12, ceil, 24, (y - C.DOOR_H - 18) - ceil, P.x);
+    rect(ctx, d.x - 12, ceil, 2, (y - C.DOOR_H - 18) - ceil, P.z);
+    rect(ctx, d.x + 10, ceil, 2, (y - C.DOOR_H - 18) - ceil, P.X);
+    sprite(ctx, 'arch', d.x - 20, y - C.DOOR_H - 20);
+    rect(ctx, d.x - 18, y - C.DOOR_H, 4, C.DOOR_H, P.x);
+    rect(ctx, d.x - 18, y - C.DOOR_H, 2, C.DOOR_H, P.z);
+    rect(ctx, d.x + 14, y - C.DOOR_H, 4, C.DOOR_H, P.x);
+    rect(ctx, d.x + 16, y - C.DOOR_H, 2, C.DOOR_H, P.X);
+  }
+
+  const BANNER_X = { 0: [300, 420], 1: [120, 600], 2: [300, 420], 3: [120, 600], 4: [300, 420] };
+  const WINDOW_X = { 0: [360], 1: [280, 440], 2: [360], 3: [280, 440], 4: [300, 420] };
+
+  function paintBackdrop(ctx, L) {
+    rect(ctx, 0, 0, C.W, C.WORLD_H, COL.mortar);
+    for (let i = 0; i < C.FLOORS; i++) {
+      const y = fy(i), ceil = y - C.FLOOR_GAP + 22;
+      bricks(ctx, C.WALL_L, ceil, C.WALL_R - C.WALL_L, y - ceil, i * 7);
+      (WINDOW_X[i] || []).forEach(x => sprite(ctx, 'window', x - 16, y - 236));
+      (BANNER_X[i] || []).forEach(x => sprite(ctx, 'banner', x - 10, ceil + 6));
+    }
+    rect(ctx, 0, 0, C.WALL_L, C.WORLD_H, COL.outer);
+    rect(ctx, C.WALL_R, 0, C.W - C.WALL_R, C.WORLD_H, COL.outer);
+    rect(ctx, C.WALL_L - 4, 0, 4, C.WORLD_H, P.x);
+    rect(ctx, C.WALL_R, 0, 4, C.WORLD_H, P.X);
+    L.doors.forEach(d => drawDoorFrame(ctx, d));
+    L.floors.forEach(f => drawFloorSlab(ctx, f.y));
+    L.floors.forEach(f => text(ctx, String(f.i + 1), 12, f.y - 160, 14, '#6a6478'));
+    L.ladders.forEach(l => drawLadderStatic(ctx, l));
+  }
+
+  function drawBackdrop(ctx, L, cam) {
+    if (!canDoc) { paintBackdrop(ctx, L); return; }
+    const tag = L.doors.map(d => d.id + d.x).join(',') + L.ladders.map(l => l.id + l.top).join(',');
+    if (!bgCanvas || bgTag !== tag) {
+      bgCanvas = document.createElement('canvas');
+      bgCanvas.width = C.W; bgCanvas.height = C.WORLD_H;
+      paintBackdrop(bgCanvas.getContext('2d'), L);
+      bgTag = tag;
+    }
+    ctx.drawImage(bgCanvas, 0, cam, C.W, C.VIEW_H, 0, cam, C.W, C.VIEW_H);
+  }
+
+  // ---------------------------------------------------------------- dynamic world pieces
+  function drawTorch(ctx, x, y, t, k, scale) {
+    const sc = scale || 2, m = sc / 2;
+    const fl = Math.sin(t * 9 + k * 2.3);
+    const g = ctx.createRadialGradient(x, y - 4 * m, 4 * m, x, y - 4 * m, (60 + fl * 4) * m);
+    g.addColorStop(0, 'rgba(255,170,60,0.28)'); g.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - 70 * m, y - 74 * m, 140 * m, 140 * m);
+    sprite(ctx, Math.floor(t * 8 + k) % 2 ? 'torch1' : 'torch2', x - 6 * m, y - 12 * m, false, sc);
+  }
+
+  function drawGate(ctx, g) {
+    const y = fy(g.floor), h = g.open ? 18 : 112;
+    rect(ctx, g.x - 34, y - 126, 68, 14, P.x);
+    rect(ctx, g.x - 34, y - 126, 68, 2, P.z);
+    for (let x = g.x - 26; x <= g.x + 26; x += 13) {
+      rect(ctx, x - 2, y - 112, 4, h, COL.gate);
+      rect(ctx, x - 2, y - 112, 2, h, '#a9aeb9');
+      if (!g.open) { rect(ctx, x - 3, y - 6, 6, 6, COL.gateD); }
+    }
+    rect(ctx, g.x - 28, y - 112 + Math.max(6, h * 0.45), 56, 4, COL.gateD);
+    if (!g.open) rect(ctx, g.x - 28, y - 30, 56, 4, COL.gateD);
+    if (g.open && g.autoClose) {
+      const left = clamp01(1 - g.openT / g.autoClose);
+      rect(ctx, g.x - 26, y - 134, 52, 4, '#20232c');
+      rect(ctx, g.x - 26, y - 134, 52 * left, 4, left < 0.35 ? COL.danger : COL.gold);
+    }
+  }
+
+  function drawDoor(ctx, d, t) {
+    const y = fy(d.floor);
+    if (d.locked) {
+      bricks(ctx, d.x - 14, y - C.DOOR_H, 28, C.DOOR_H, 99);
+      ctx.strokeStyle = COL.danger; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(d.x - 9, y - 78); ctx.lineTo(d.x + 9, y - 56);
+      ctx.moveTo(d.x + 9, y - 78); ctx.lineTo(d.x - 9, y - 56);
+      ctx.stroke();
+      return;
+    }
+    if (!d.open) {
+      // oak planks with iron bands and a ring
+      rect(ctx, d.x - 14, y - C.DOOR_H, 28, C.DOOR_H, P.d);
+      for (let x = d.x - 14; x < d.x + 14; x += 8) rect(ctx, x, y - C.DOOR_H, 2, C.DOOR_H, P.D);
+      rect(ctx, d.x - 14, y - C.DOOR_H, 28, 2, P.L);
+      [y - C.DOOR_H + 22, y - 30].forEach(by => { rect(ctx, d.x - 14, by, 28, 6, P.i); rect(ctx, d.x - 14, by, 28, 2, '#7c8291'); });
+      rect(ctx, d.x + 2, y - 66, 6, 6, P.g); rect(ctx, d.x + 4, y - 64, 2, 2, P.d);
+      return;
+    }
+    // open: dark passage, door swung inward on the far side
+    rect(ctx, d.x - 14, y - C.DOOR_H, 28, C.DOOR_H, '#0e0b12');
+    const sx = d.side === 'L' ? d.x + 14 : d.x - 20;
+    rect(ctx, sx, y - C.DOOR_H, 6, C.DOOR_H, P.D);
+    rect(ctx, sx + 2, y - C.DOOR_H, 2, C.DOOR_H, P.d);
+    if (d.gift) {
+      ctx.strokeStyle = `rgba(127,232,255,${0.25 + 0.2 * Math.sin(t * 3)})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(d.x - 16, y - C.DOOR_H - 2, 32, C.DOOR_H + 2);
+    }
+  }
+
+  function drawLever(ctx, v) {
+    const y = fy(v.floor);
+    rect(ctx, v.x - 12, y - 10, 24, 10, P.x);
+    rect(ctx, v.x - 12, y - 10, 24, 2, P.z);
+    rect(ctx, v.x - 2, y - 14, 4, 4, P.i);
+    const ang = v.state === 'idle' ? -0.75 : 0.75;
+    const ex = v.x + Math.sin(ang) * 26, ey = y - 12 - Math.cos(ang) * 26;
+    const sprungTrap = v.state === 'sprung' && v.effect === 'trap';
+    ctx.strokeStyle = sprungTrap ? COL.danger : P.i;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(v.x, y - 12); ctx.lineTo(ex, ey); ctx.stroke();
+    // A trapped lever's knob is a slightly different shade — a clue for the observant.
+    let knob = P.g;
+    if (sprungTrap) knob = COL.danger;
+    else if (v.state === 'sprung') knob = '#7a7068';
+    else if (v.effect === 'trap') knob = '#c98748';
+    ctx.fillStyle = knob;
+    ctx.fillRect(Math.round(ex) - 5, Math.round(ey) - 5, 10, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(Math.round(ex) - 4, Math.round(ey) - 4, 3, 3);
+  }
+
+  function drawChest(ctx, c) {
+    const y = fy(c.floor);
+    sprite(ctx, c.opened ? 'chest_open' : 'chest_closed', c.x - 12, y - 20);
+    if (!c.opened && c.trapped) { rect(ctx, c.x - 2, y - 12, 4, 6, '#d9683f'); } // clasp runs a little red
+  }
+
+  function drawSpikes(ctx, s) {
+    const y = fy(s.floor), h = s.active ? 14 : 4;
+    rect(ctx, s.x, y - 3, s.w, 3, P.i);
+    ctx.fillStyle = s.retract ? '#d8c8c8' : '#c9ced8';
+    for (let x = s.x; x + 12 <= s.x + s.w + 0.5; x += 12) {
+      ctx.beginPath(); ctx.moveTo(x, y - 2); ctx.lineTo(x + 6, y - 2 - h); ctx.lineTo(x + 12, y - 2); ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function drawEruption(ctx, e, t) {
+    const y = fy(e.floor);
+    if (e.t < e.warn) {
+      rect(ctx, e.x1, y - 6, e.x2 - e.x1, 6, `rgba(255,70,50,${0.35 + 0.3 * Math.sin(t * 40)})`);
+    } else {
+      ctx.fillStyle = '#e9dede';
+      for (let x = e.x1; x + 16 <= e.x2; x += 16) {
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 8, y - 44); ctx.lineTo(x + 16, y); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  function drawShard(ctx, sh, t) {
+    if (sh.collected) return;
+    const y = fy(sh.floor) - 60 + Math.sin(t * 3) * 4;
+    ctx.fillStyle = 'rgba(127,232,255,0.16)';
+    ctx.beginPath(); ctx.arc(sh.x, y, 18, 0, Math.PI * 2); ctx.fill();
+    sprite(ctx, 'shard', sh.x - 7, y - 7);
+  }
+
+  function drawExit(ctx, ex, t) {
+    const y = fy(ex.floor), x = ex.x;
+    const g = ctx.createRadialGradient(x, y - 50, 10, x, y - 50, 120);
+    g.addColorStop(0, `rgba(242,166,90,${0.22 + 0.06 * Math.sin(t * 2)})`); g.addColorStop(1, 'rgba(242,166,90,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - 130, y - 180, 260, 200);
+    sprite(ctx, 'exitarch', x - 40, y - 112, false, 4);   // the great arch onto the battlements
+    text(ctx, spaced('ESCAPE'), x, y - 126, 13, COL.gold);
+  }
+
+  function drawGuard(ctx, g, t) {
+    const y = fy(g.floor), x = g.x;
+    const flip = g.dir < 0;
+    const stunned = g.stun > 0;
+    let frame;
+    if (g.type === 'archer') frame = stunned ? 'archer_idle' : (g.shootT < 0.3 ? 'archer_shoot' : 'archer_idle');
+    else if (stunned) frame = `${g.type}_stun`;
+    else frame = `${g.type}_walk${Math.floor(t * 7 + x * 0.05) % 2 + 1}`;
+    sprite(ctx, frame, x - 16, y - 48 + (stunned && g.type === 'archer' ? 6 : 0), flip);
+    if (stunned) {
+      ctx.fillStyle = '#ffe36a';
+      for (let i = 0; i < 3; i++) {
+        const a = t * 5 + i * 2.1;
+        ctx.fillRect(Math.round(x + Math.cos(a) * 14) - 2, Math.round(y - 56 + Math.sin(a) * 4), 4, 4);
+      }
+    } else if (g.alert) {
+      shadowText(ctx, '!', x, y - 62, 22, COL.danger);
+    }
+  }
+
+  function drawArrow(ctx, a) {
+    sprite(ctx, 'arrow', a.x - 12, fy(a.floor) - 24, a.dir < 0);
+  }
+
+  function heroFrame(game) {
+    const p = game.player;
+    if (p.dead) return game.endT > 0.35 ? 'hero_dead' : 'hero_hurt';
+    if (p.climbing) return Math.floor(p.anim * 7) % 2 ? 'hero_climb1' : 'hero_climb2';
+    if (!p.onGround) return 'hero_walk1';
+    if (p.act > 0) return 'hero_interact';
+    if (Math.abs(p.vx) > 1) return ['hero_walk1', 'hero_idle', 'hero_walk2', 'hero_idle'][Math.floor(p.anim * 9) % 4];
+    return 'hero_idle';
+  }
+
+  function drawPlayer(ctx, game) {
+    const p = game.player, frame = heroFrame(game);
+    if (frame === 'hero_dead') { sprite(ctx, 'hero_dead', p.x - 24, p.y - 22, p.face < 0); return; }
+    sprite(ctx, frame, p.x - 16, p.y - 48, p.face < 0 && !p.climbing);
+  }
+
+  function drawPrompt(ctx, pr, t) {
+    const y = pr.y + Math.sin(t * 4) * 2;
+    rrect(ctx, pr.x - 11, y - 11, 22, 22, 4);
+    ctx.fillStyle = '#f4efe2'; ctx.fill();
+    ctx.strokeStyle = '#1b1320'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#f4efe2';
+    ctx.beginPath(); ctx.moveTo(pr.x - 4, y + 11); ctx.lineTo(pr.x + 4, y + 11); ctx.lineTo(pr.x, y + 16); ctx.closePath(); ctx.fill();
+    text(ctx, pr.kind === 'sealed' ? '✕' : 'E', pr.x, y + 1, 16, '#1b1320');
+  }
+
+  // assemble: null for a finished castle, else seconds since assembly began (floors slide in one by one)
+  function drawWorld(ctx, game, assemble) {
+    const L = game.level, cam = Math.round(game.camY), t = game.clock;
+    const prog = f => (assemble === null || assemble === undefined ? 1 : clamp01((assemble - f * 0.16) / 0.32));
+    const onFloor = (f, fn) => {
+      const a = prog(f);
+      if (a <= 0) return;
+      if (a >= 1) { fn(); return; }
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(0, (1 - a) * 40);
+      fn();
+      ctx.restore();
+    };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, C.W, C.VIEW_H); ctx.clip();
+    const sh = game.shakeOffset ? game.shakeOffset() : { x: 0, y: 0 };
+    ctx.translate(sh.x, sh.y - cam);
+    if (assemble !== null && assemble !== undefined) {
+      rect(ctx, 0, cam, C.W, C.VIEW_H, COL.mortar);
+      ctx.save(); ctx.globalAlpha = clamp01(assemble / 0.4); drawBackdrop(ctx, L, cam); ctx.restore();
+    } else drawBackdrop(ctx, L, cam);
+    for (let i = 0; i < C.FLOORS; i++) onFloor(i, () => [150, 570].forEach((x, k) => drawTorch(ctx, x, fy(i) - 200, t, i * 2 + k)));
+    L.gates.forEach(g => onFloor(g.floor, () => drawGate(ctx, g)));
+    L.doors.forEach(d => onFloor(d.floor, () => drawDoor(ctx, d, t)));
+    L.levers.forEach(v => onFloor(v.floor, () => drawLever(ctx, v)));
+    L.chests.forEach(c => onFloor(c.floor, () => drawChest(ctx, c)));
+    L.spikes.forEach(s => onFloor(s.floor, () => drawSpikes(ctx, s)));
+    (game.eruptions || []).forEach(e => drawEruption(ctx, e, t));
+    L.shards.forEach(s => onFloor(s.floor, () => drawShard(ctx, s, t)));
+    onFloor(L.exit.floor, () => drawExit(ctx, L.exit, t));
+    L.guards.forEach(g => onFloor(g.floor, () => drawGuard(ctx, g, t)));
+    (game.arrows || []).forEach(a => drawArrow(ctx, a));
+    if (game.player) drawPlayer(ctx, game);
+    (game.particles || []).forEach(p => drawParticle(ctx, p));
+    if (game.prompt && game.state === 'play') drawPrompt(ctx, game.prompt, t);
+    ctx.restore();
+    drawVignette(ctx);
+  }
+
+  // square pixel particles: shard sparks twinkle and drift up, dust chips fall and fade
+  function drawParticle(ctx, p) {
+    const a = 1 - p.t / p.life;
+    const s = Math.max(1, Math.round(p.s * (p.kind === 'shard' ? 0.55 + 0.45 * Math.abs(Math.sin(p.t * 22)) : 1)));
+    ctx.globalAlpha = p.kind === 'shard' ? a : a * 0.9;
+    ctx.fillStyle = p.c;
+    ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+    ctx.globalAlpha = 1;
+  }
+
+  // darkens the edges of the viewport so the torches and windows read as the light sources
+  let vignette = null;
+  function drawVignette(ctx) {
+    if (!vignette) {
+      vignette = ctx.createRadialGradient(C.W / 2, C.VIEW_H * 0.48, C.W * 0.28, C.W / 2, C.VIEW_H * 0.48, C.W * 0.86);
+      vignette.addColorStop(0, 'rgba(6,4,10,0)');
+      vignette.addColorStop(0.6, 'rgba(6,4,10,0.22)');
+      vignette.addColorStop(1, 'rgba(6,4,10,0.62)');
+    }
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, C.W, C.VIEW_H);
+  }
+
+  // ---------------------------------------------------------------- overlays
+  function stoneBar(ctx, x, y, w, h) {
+    rect(ctx, x, y, w, h, 'rgba(44,47,60,0.92)');
+    rect(ctx, x, y, w, 2, P.z);
+    rect(ctx, x, y + h - 2, w, 2, '#15171e');
+  }
+
+  function drawHUD(ctx, game) {
+    stoneBar(ctx, 0, 0, C.W, 54);
+    const f = CR.floorAt(game.player.y);
+    text(ctx, `RUN ${game.runNumber}`, 20, 28, 18, COL.dim, 'left');
+    sprite(ctx, 'cross', C.W / 2 - 78, 20);
+    text(ctx, `FLOOR ${f + 1}`, C.W / 2 + 6, 28, 24, COL.gold);
+    text(ctx, `${game.runTime.toFixed(1)}s  ◆${game.stats.shards}`, C.W - 20, 28, 18, COL.dim, 'right');
+    if (game.hintMsg) {
+      const a = Math.min(1, (2.2 - game.hintMsg.t) / 0.5);
+      rect(ctx, 40, 928, C.W - 80, 44, `rgba(8,6,12,${0.65 * a})`);
+      text(ctx, game.hintMsg.text, C.W / 2, 950, 18, `rgba(239,228,200,${a})`, 'center', 'normal');
+    }
+  }
+
+  function drawWhisper(ctx, game, y) {
+    const w = game.whisper;
+    if (!w) return;
+    const a = Math.max(0, Math.min(1, w.t / 0.6, (w.dur - w.t) / 0.8));
+    shadowText(ctx, spaced(w.title), C.W / 2, y, 18, `rgba(${COL.whisper},${0.85 * a})`);
+    if (w.sub) shadowText(ctx, w.sub, C.W / 2, y + 30, 20, `rgba(${COL.whisper},${0.65 * a})`, 'center', 'italic');
+  }
+
+  function drawArrowIcon(ctx, cx, cy, dir, color) {
+    const s = 20;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (dir === 'left') { ctx.moveTo(cx - s, cy); ctx.lineTo(cx + s * 0.7, cy - s); ctx.lineTo(cx + s * 0.7, cy + s); }
+    if (dir === 'right') { ctx.moveTo(cx + s, cy); ctx.lineTo(cx - s * 0.7, cy - s); ctx.lineTo(cx - s * 0.7, cy + s); }
+    if (dir === 'up') { ctx.moveTo(cx, cy - s); ctx.lineTo(cx - s, cy + s * 0.7); ctx.lineTo(cx + s, cy + s * 0.7); }
+    if (dir === 'down') { ctx.moveTo(cx, cy + s); ctx.lineTo(cx - s, cy - s * 0.7); ctx.lineTo(cx + s, cy - s * 0.7); }
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawControls(ctx, input, dim) {
+    rect(ctx, 0, C.VIEW_H, C.W, C.CTRL_H, '#151320');
+    rect(ctx, 0, C.VIEW_H, C.W, 3, '#2c2f3c');
+    const held = (input && input.held) || {};
+    ctx.save();
+    if (dim) ctx.globalAlpha = 0.35;
+    CR.BUTTONS.forEach(b => {
+      const on = !!held[b.id];
+      rrect(ctx, b.x, b.y, b.w, b.h, b.label ? b.w / 2 : 16);
+      ctx.fillStyle = on ? '#4a3d5c' : '#252132';
+      ctx.fill();
+      ctx.strokeStyle = on ? '#c9b98a' : '#4d4560';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      if (b.id === 'act') {
+        text(ctx, 'ACT', cx, cy - 8, 26, on ? '#ffffff' : COL.text);
+        text(ctx, '(E)', cx, cy + 22, 15, on ? '#ffffff' : COL.dim);
+      } else if (b.label) text(ctx, b.label, cx, cy, 26, on ? '#ffffff' : COL.text);
+      else drawArrowIcon(ctx, cx, cy, b.id, on ? '#ffffff' : COL.text);
+    });
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------- landscape (title + escape sequence)
+  function drawSky(ctx, y0, y1, sunY, cloudsFrom) {
+    const g = ctx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0, P.V); g.addColorStop(0.45, P.v); g.addColorStop(0.8, P.A); g.addColorStop(1, P.a);
+    ctx.fillStyle = g; ctx.fillRect(0, y0, C.W, y1 - y0);
+    const sg = ctx.createRadialGradient(360, sunY, 10, 360, sunY, 260);
+    sg.addColorStop(0, 'rgba(255,220,150,0.55)'); sg.addColorStop(1, 'rgba(255,180,90,0)');
+    ctx.fillStyle = sg; ctx.fillRect(0, y0, C.W, y1 - y0);
+    ctx.fillStyle = '#ffd98a';
+    ctx.beginPath(); ctx.arc(360, sunY, 34, 0, Math.PI * 2); ctx.fill();
+    // cloud bands
+    [[60, sunY - 120, 220, 8], [380, sunY - 150, 260, 10], [200, sunY - 60, 300, 8], [480, sunY - 30, 180, 6]].forEach(([x, y, w, h]) => {
+      if (cloudsFrom !== undefined && y < cloudsFrom) return;
+      rect(ctx, x, y, w, h, 'rgba(120,70,110,0.5)');
+      rect(ctx, x + 20, y - 4, w - 60, 4, 'rgba(160,90,120,0.4)');
+    });
+  }
+
+  function drawHills(ctx, horizon) {
+    ctx.fillStyle = '#2a1c3a';
+    ctx.beginPath(); ctx.moveTo(0, horizon + 10);
+    [[80, -50], [180, -20], [300, -70], [420, -30], [540, -90], [660, -40], [720, -60]].forEach(([x, dy]) => ctx.lineTo(x, horizon + dy));
+    ctx.lineTo(C.W, horizon + 80); ctx.lineTo(0, horizon + 80); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1d1430';
+    ctx.beginPath(); ctx.moveTo(0, horizon + 40);
+    [[120, 10], [260, 30], [400, 0], [520, 30], [640, 10], [720, 30]].forEach(([x, dy]) => ctx.lineTo(x, horizon + dy));
+    ctx.lineTo(C.W, horizon + 120); ctx.lineTo(0, horizon + 120); ctx.closePath(); ctx.fill();
+    // river catching the last light
+    ctx.fillStyle = 'rgba(242,166,90,0.35)';
+    ctx.beginPath(); ctx.moveTo(300, horizon + 50); ctx.lineTo(340, horizon + 50); ctx.lineTo(520, horizon + 120); ctx.lineTo(420, horizon + 120); ctx.closePath(); ctx.fill();
+  }
+
+  function drawCastleSilhouette(ctx, x, base, t) {
+    // keep, two towers, crenellations, lit windows
+    const towers = [[x, base, 90, 300], [x + 130, base, 70, 240], [x + 260, base, 110, 380], [x + 400, base, 80, 260]];
+    rect(ctx, x, base - 190, 480, 190, '#0d0a14');
+    towers.forEach(([tx, ty, w, h]) => {
+      rect(ctx, tx, ty - h, w, h, '#0d0a14');
+      for (let i = 0; i < w; i += 20) rect(ctx, tx + i, ty - h - 14, 12, 14, '#0d0a14');
+    });
+    for (let i = 0; i < 480; i += 24) rect(ctx, x + i, base - 204, 14, 14, '#0d0a14');
+    // windows
+    ctx.fillStyle = `rgba(255,190,90,${0.6 + 0.3 * Math.sin(t * 2)})`;
+    [[30, 120], [60, 200], [150, 100], [290, 260], [320, 180], [300, 90], [430, 160], [200, 60], [380, 60]].forEach(([dx, dy]) => rect(ctx, x + dx, base - dy, 8, 14, ctx.fillStyle));
+    // banner on the tallest tower
+    sprite(ctx, 'banner', x + 300, base - 400 - 44);
+  }
+
+  function drawTitle(ctx, game) {
+    const t = game.clock, mem = game.mem;
+    drawSky(ctx, 0, 700, 600, 500);
+    drawHills(ctx, 640);
+    drawCastleSilhouette(ctx, 250, 920, t);
+    // foreground ground + the hero, large
+    rect(ctx, 0, 920, C.W, C.H - 920, '#0d0a14');
+    sprite(ctx, 'hero_idle', 70, 728, false, 8);
+
+    shadowText(ctx, 'THE CASTLE', C.W / 2, 120, 64, COL.text);
+    sprite(ctx, 'cross', C.W / 2 - 8, 158, false, 2);
+    shadowText(ctx, 'REMEMBERS', C.W / 2, 220, 64, COL.gold);
+    shadowText(ctx, spaced('CLIMB. LEARN. ADAPT. ESCAPE.'), C.W / 2, 290, 17, COL.gold);
+    shadowText(ctx, 'Every action leaves a trace.', C.W / 2, 336, 21, COL.text, 'center', 'italic');
+    shadowText(ctx, 'The castle remembers.', C.W / 2, 364, 21, COL.text, 'center', 'italic');
+    shadowText(ctx, 'A forgotten castle in Visigothic Iberia, pre-711.', C.W / 2, 410, 16, COL.dim, 'center', 'normal');
+
+    const status = mem.runs === 0
+      ? 'It has never seen you.'
+      : `It has watched you ${mem.runs} time${mem.runs === 1 ? '' : 's'}. Escapes: ${mem.completions}.`;
+    shadowText(ctx, status, C.W / 2, 470, 20, `rgb(${COL.whisper})`, 'center', 'italic');
+
+    const a = 0.55 + 0.45 * Math.sin(t * 3);
+    stoneBar(ctx, 90, 1000, C.W - 180, 70);
+    text(ctx, 'TAP OR PRESS ENTER', C.W / 2, 1035, 30, `rgba(232,192,100,${a})`);
+    stoneBar(ctx, 60, 1085, C.W - 120, 50);
+    text(ctx, '← → move · ↑ ↓ ladders · E interact · Space jump', C.W / 2, 1110, 17, COL.dim, 'center', 'normal');
+
+    if (mem.runs > 0) {
+      const F = C.FORGET;
+      rrect(ctx, F.x, F.y, F.w, F.h, 12);
+      ctx.fillStyle = 'rgba(26,19,32,0.9)'; ctx.fill();
+      ctx.strokeStyle = '#4d4560'; ctx.lineWidth = 2; ctx.stroke();
+      text(ctx, 'FORGET ME (F)', F.x + F.w / 2, F.y + F.h / 2, 20, COL.dim);
+    }
+    text(ctx, 'TOPIL CREATIONS', C.W / 2, 1252, 13, '#5f5870', 'center', 'normal');
+    drawWhisper(ctx, game, 520);
+  }
+
+  // The escape: out through the final door onto the battlements at dusk.
+  function drawEscape(ctx, game) {
+    const t = game.endT, cl = game.clock;
+    const horizon = 560;
+    drawSky(ctx, 0, horizon + 40, horizon - 30);
+    drawHills(ctx, horizon);
+    // birds
+    ctx.strokeStyle = 'rgba(20,10,30,0.8)'; ctx.lineWidth = 2;
+    [[120, 200, 0.9], [170, 230, 1.1], [520, 160, 1.0], [560, 190, 0.8]].forEach(([bx, by, sp]) => {
+      const x = (bx + t * 18 * sp) % (C.W + 40) - 20, y = by + Math.sin(t * 3 * sp + bx) * 6;
+      ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x, y - 4); ctx.lineTo(x + 6, y); ctx.stroke();
+    });
+    // tower top: back merlons, walkway, front parapet (everything at 2× the in-game scale)
+    const walk = 820;
+    rect(ctx, 0, walk - 110, C.W, 110, P.X);
+    for (let x = -20; x < C.W; x += 110) { rect(ctx, x, walk - 176, 70, 66, P.X); rect(ctx, x, walk - 176, 70, 5, P.x); rect(ctx, x + 66, walk - 176, 4, 66, '#1b1d26'); }
+    rect(ctx, 0, walk - 110, C.W, 5, P.x);
+    bricks(ctx, 0, walk, C.W, 44, 5);
+    rect(ctx, 0, walk, C.W, 6, P.z);
+    bricks(ctx, 0, walk + 44, C.W, C.H - walk - 44, 9);
+    const g = ctx.createLinearGradient(0, walk + 60, 0, C.H);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.85)');
+    ctx.fillStyle = g; ctx.fillRect(0, walk + 60, C.W, C.H - walk - 60);
+    // the stair head the hero climbs out of
+    rect(ctx, 150, walk - 70, 100, 70, '#0e0b12');
+    sprite(ctx, 'arch', 140, walk - 110, false, 6);
+    // banner pole
+    rect(ctx, 580, walk - 330, 8, 330, P.D);
+    const wave = Math.floor(cl * 6) % 2;
+    sprite(ctx, 'banner', 588, walk - 326 + wave * 3, false, 4);
+    drawTorch(ctx, 680, walk - 100, cl, 3, 4);
+
+    // hero: climbs out (0–1.0s), walks to the edge (1.0–2.8s), stands with the cloak in the wind
+    let frame, hx, hy;
+    if (t < 1.0) { frame = Math.floor(t * 7) % 2 ? 'hero_climb1' : 'hero_climb2'; hx = 200; hy = walk + 70 - t * 70; }
+    else if (t < 2.8) { const u = (t - 1.0) / 1.8; frame = ['hero_walk1', 'hero_idle', 'hero_walk2', 'hero_idle'][Math.floor(t * 9) % 4]; hx = 200 + u * 240; hy = walk; }
+    else { frame = Math.floor(cl * 4) % 2 ? 'hero_wind1' : 'hero_wind2'; hx = 440; hy = walk; }
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, C.W, walk); ctx.clip();
+    sprite(ctx, frame, hx - 32, hy - 96, false, 4);
+    ctx.restore();
+    if (game.winPhase === 'cine') {
+      const a = clamp01((t - 2.2) / 0.8);
+      shadowText(ctx, spaced('YOU ESCAPED'), C.W / 2, 90, 46, `rgba(232,192,100,${a})`);
+      shadowText(ctx, 'The castle will remember how.', C.W / 2, 140, 20, `rgba(239,228,200,${a})`, 'center', 'italic');
+      if (t > 0.5) text(ctx, 'tap to continue', C.W / 2, 1180, 16, 'rgba(154,143,156,0.6)', 'center', 'normal');
+    }
+  }
+
+  function drawSummary(ctx, game, alpha) {
+    const win = game.state === 'win', s = game.lastStats;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    rect(ctx, 0, 0, C.W, C.H, 'rgba(6,4,10,0.86)');
+    shadowText(ctx, win ? 'YOU ESCAPED' : 'YOU FELL', C.W / 2, 140, 54, win ? COL.gold : COL.danger);
+    const sub = win
+      ? `in ${s.time.toFixed(1)}s${game.mem.bestTime === Math.round(s.time * 1000) / 1000 ? '  — best yet' : ''}`
+      : (s.cause || '');
+    text(ctx, sub, C.W / 2, 200, 22, COL.text, 'center', 'normal');
+
+    let y = 270;
+    text(ctx, 'THIS RUN', 60, y, 22, COL.dim, 'left'); y += 42;
+    const lines = [
+      `Pace: ${game.lastPace === 'rush' ? 'RUSHED' : 'WAITED'} (${Math.round(game.lastIdleRatio * 100)}% standing still)`,
+      `Doors taken: left ${s.doorL} · right ${s.doorR}`,
+      `Levers pulled: ${s.leversPulled} (L ${s.leverL} · R ${s.leverR})`,
+      `Guards shoved: ${s.confronted} · slipped past: ${s.avoided}`,
+      `Chests opened: ${s.chests} of ${s.chestsAvail} · Traps sprung: ${s.traps}`,
+      `Shards: ${s.shards} · Highest floor: ${s.maxFloor + 1}/${C.FLOORS}`
+    ];
+    lines.forEach(l => { text(ctx, l, 60, y, 20, COL.text, 'left', 'normal'); y += 34; });
+
+    y += 30;
+    text(ctx, spaced('THE CASTLE REMEMBERS'), 60, y, 20, `rgb(${COL.whisper})`, 'left'); y += 44;
+    const notes = (game.nextPlan.notes || []).filter(n => n.line);
+    if (!notes.length) y = wrap(ctx, '…nothing yet. Show it who you are.', 60, y, 600, 30, 20, `rgba(${COL.whisper},0.8)`);
+    notes.slice(0, 7).forEach(n => { y = wrap(ctx, '• ' + n.line, 60, y, 600, 30, 20, `rgba(${COL.whisper},0.9)`) + 8; });
+
+    const ready = win ? game.summaryT > 0.6 : game.endT > 0.6;
+    if (ready) {
+      const a = 0.55 + 0.45 * Math.sin(game.clock * 4);
+      text(ctx, win ? 'TAP TO ENTER AGAIN' : 'TAP TO RISE AGAIN', C.W / 2, 1170, 30, `rgba(232,192,100,${a})`);
+    }
+    text(ctx, `Escapes ${game.mem.completions} · Falls ${game.mem.deaths}`, C.W / 2, 1225, 18, COL.dim, 'center', 'normal');
+    ctx.restore();
+  }
+
+  // The reconstruction transition: OBSERVED → RECONSTRUCTING → the castle assembles floor by floor.
+  function drawRebuild(ctx, game, input) {
+    const t = game.rebuildT;
+    if (t < REB.assembleAt) {
+      rect(ctx, 0, 0, C.W, C.H, '#050308');
+      const a1 = clamp01(t / 0.5);
+      text(ctx, spaced('THE CASTLE OBSERVED YOU'), C.W / 2, 460, 22, `rgba(${COL.whisper},${a1})`);
+      const a2 = clamp01((t - 0.45) / 0.5);
+      if (a2 > 0) wrap(ctx, game.observation || '', C.W / 2, 530, 600, 36, 26, `rgba(239,228,200,${a2})`, 'center', 'bold');
+      if (t >= REB.reconAt) {
+        const dots = '.'.repeat(1 + (Math.floor((t - REB.reconAt) * 5) % 3));
+        text(ctx, 'RECONSTRUCTING' + dots, C.W / 2, 740, 28, COL.gold, 'center');
+      }
+      if (t > REB.skipAfter) text(ctx, 'tap to hurry', C.W / 2, 1180, 16, 'rgba(154,143,156,0.6)', 'center', 'normal');
+      return;
+    }
+    drawWorld(ctx, game, game.assembleT);
+    const left = REB.total - t;
+    const a = clamp01(left / 0.35);
+    rect(ctx, 0, 0, C.W, 54, `rgba(8,6,12,${0.72 * a})`);
+    const dots = '.'.repeat(1 + (Math.floor(t * 5) % 3));
+    text(ctx, 'RECONSTRUCTING' + dots, C.W / 2, 28, 22, `rgba(232,192,100,${a})`);
+    drawControls(ctx, input, true);
+  }
+
+  function drawDebugButton(ctx, on) {
+    const B = C.DEBUG_BTN;
+    rrect(ctx, B.x, B.y, B.w, B.h, 8);
+    ctx.fillStyle = on ? 'rgba(159,227,165,0.25)' : 'rgba(8,6,12,0.6)';
+    ctx.fill();
+    ctx.strokeStyle = on ? COL.debug : '#4d4560';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    text(ctx, 'DBG', B.x + B.w / 2, B.y + B.h / 2, 15, on ? COL.debug : COL.dim);
+  }
+
+  function drawDebug(ctx, game) {
+    const lines = game.debugInfo();
+    rect(ctx, 10, 96, C.W - 20, C.VIEW_H - 106, 'rgba(4,3,8,0.88)');
+    ctx.strokeStyle = COL.debug; ctx.lineWidth = 1;
+    ctx.strokeRect(10.5, 96.5, C.W - 21, C.VIEW_H - 107);
+    let y = 116;
+    text(ctx, 'BEHAVIOR MODEL  (` or I, or tap DBG)', 22, y, 14, COL.debug, 'left'); y += 26;
+    for (const l of lines) {
+      if (y > C.VIEW_H - 24) break;
+      if (l === '') { y += 10; continue; }
+      const head = /^(STORED|THIS CASTLE|NEXT CASTLE|THIS RUN)/.test(l);
+      y = wrap(ctx, l, 22, y, C.W - 44, 19, 14, head ? COL.debug : COL.text, 'left', head ? 'bold' : 'normal') + 3;
+    }
+  }
+
+  function render(ctx, game, input) {
+    ctx.save();
+    rect(ctx, 0, 0, C.W, C.H, COL.bg);
+    if (game.state === 'title') {
+      drawTitle(ctx, game);
+    } else if (game.state === 'rebuild') {
+      drawRebuild(ctx, game, input);
+    } else if (game.state === 'win') {
+      drawEscape(ctx, game);
+      if (game.winPhase === 'summary') drawSummary(ctx, game, clamp01(game.summaryT / 0.5));
+    } else {
+      drawWorld(ctx, game, null);
+      if (game.flash > 0) rect(ctx, 0, 0, C.W, C.VIEW_H, `rgba(214,40,32,${(0.45 * game.flash).toFixed(3)})`);
+      drawHUD(ctx, game);
+      drawWhisper(ctx, game, 92);
+      drawControls(ctx, input, false);
+      if (game.state === 'dead') drawSummary(ctx, game, clamp01(game.endT / 0.5));
+    }
+    if (game.debug) drawDebug(ctx, game);
+    drawDebugButton(ctx, game.debug);
+    ctx.restore();
+  }
+
+  CR.render = render;
+  CR.renderParts = { drawWorld, drawEscape, drawTitle };
+})(window.CR = window.CR || {});
+
+
+// THE CASTLE REMEMBERS — boot + loop
+(function (CR) {
+  'use strict';
+  const C = CR.C;
+
+  function safeStorage() {
+    try {
+      const ls = window.localStorage;
+      ls.setItem('__cr_test', '1');
+      ls.removeItem('__cr_test');
+      return ls;
+    } catch (e) {
+      return CR.Memory.memoryStorage(); // private mode etc. — play still works, just won't persist
+    }
+  }
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  canvas.width = C.W;
+  canvas.height = C.H;
+
+  function fit() {
+    const s = Math.min(window.innerWidth / C.W, window.innerHeight / C.H);
+    canvas.style.width = Math.floor(C.W * s) + 'px';
+    canvas.style.height = Math.floor(C.H * s) + 'px';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+
+  const game = new CR.Game(safeStorage());
+  const input = new CR.Input(canvas);
+  window.CASTLE = game; // handy for debugging in the console
+
+  // Audio context requires user gesture to resume on some browsers
+  const unlockAudio = () => {
+    if (CR.Sound && CR.Sound.context && CR.Sound.context.state === 'suspended') {
+      CR.Sound.context.resume().catch(() => {});
+    }
+    window.removeEventListener('pointerdown', unlockAudio);
+    window.removeEventListener('touchstart', unlockAudio);
+    window.removeEventListener('keydown', unlockAudio);
+  };
+  window.addEventListener('pointerdown', unlockAudio);
+  window.addEventListener('touchstart', unlockAudio);
+  window.addEventListener('keydown', unlockAudio);
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    try {
+      game.update(dt, input.sample());
+      CR.render(ctx, game, input);
+    } catch (err) {
+      console.error(err);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})(window.CR);
+
+</script>
+</body>
+</html>
