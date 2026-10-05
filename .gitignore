@@ -30,3 +30,8 @@ desktop.ini
 
 # Temp dirs used during analysis
 .tmp-*/
+
+# Gate 7 tooling
+__pycache__/
+*.pyc
+*.prn

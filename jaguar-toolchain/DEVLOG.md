@@ -769,3 +769,135 @@ Owner must load `gate6_castle.cof` in Virtual Jaguar v2.1.3 R5 (NTSC) and verify
 | Walk right edge on Floor 3 (grounded) → gold flash + Floor 1 reset | ⏳ |
 | Die repeatedly; speed and spawn side adapt per SIDE_BIAS | ⏳ |
 | No corruption, no black screen, stable 59.9 FPS | ⏳ |
+---
+
+## Gate 7 — Five-Floor Castle (Claude, gameplay lead) — `claude/gameplay-refinement`
+
+**Source:** `gate7_castle/gate7_castle.s` + generated `gate7_castle/castle_art.inc`
+**Binary:** `gate7_castle/gate7_castle.cof`
+**Canon:** `original/index.html` (rules summarised from the HTML game, line refs in the
+commit message history of this branch).
+
+### What the player gets
+
+One screen per floor; ladders flip between floors (climb up through the ceiling,
+or down through a ladder hole in the floor).
+
+| Floor | Role | Contents |
+|---|---|---|
+| F1 | Choice / Observation | two closed doors (ACT opens) guard the L and R ladders |
+| F2 | Lever / Escalation | two levers, a gate over the centre ladder, Sentinel Skull patrol |
+| F3 | Choice / Adaptation | doors again, static spikes in both corridors |
+| F4 | Lever / Pressure | levers + gate, harsher patrol |
+| F5 | Judgment / Exit | Judgment Wraith pursues; exit arch (moves to the left once you favour RIGHT doors and have escaped) |
+
+Death (one touch) ends the run: red pulse, the castle merges what it saw into memory,
+rebuilds itself, new run on F1. Escape: gold pulse (Bob's $CFCB), merge with double
+weight, rebuild.
+
+### Controls (Virtual Jaguar default keys)
+
+| Key | Pad | Action |
+|---|---|---|
+| Z / C | Left / Right (J10/J11) | walk |
+| S | Up (J8) | jump; at a ladder foot: climb up |
+| X | Down (J9) | at a ladder hole: climb down; otherwise ACT |
+| L | A (B1, JOYBUTS row 0) | ACT: shove a guard ahead > pull lever > open door |
+
+### Enemies (behaviour; art is Kimi's)
+
+| Enemy | Type | Behaviour |
+|---|---|---|
+| Sentinel Skull | 0 | patrol baseline (Bob's skull); +2/16 px speed per death, max +8 (Gate 5 lineage) |
+| Fallen Guard | 1 | patrol; chases within 81 px when the castle saw you avoid guards |
+| Fallen Guard (heavy) | 2 | armour 1: first shove only staggers (0.6 s), second shove stuns |
+| Stone Watcher | 3 | static archer, faces you, arrow every 2.4 s at knee height — jump it |
+| Judgment Wraith | 4 | F5 pursuer; its patrol covers the ladder top (rush) or the whole floor (wait); armoured (brace 2+) |
+
+Shove = ACT facing a guard within 28 px: stun 3 s (1.2 s after "brace"), push 10 px.
+Alarm (alarm lever): every guard on the floor wakes and chases within 190 px at x1.6
+(fairness, beyond the original: a guard pinned under the hero stays down, and a stunned
+guard gets up after at most 1/3 s, so there is always time to turn and shove).
+Speeds keep the original's ratios — even a rushed, alarmed guard is slower than the hero.
+
+### Traps
+
+| Trap | Where | Rule |
+|---|---|---|
+| Static spikes | F3 corridors (always) | jump them (16 px window; 8 px when widened) |
+| Retracting spikes | adaptations on F1/F2/F3/F4/F5 | up 1.0 s (1.3 s for waiters) of every 1.8–2.0 s |
+| Eruption | a trapped lever | 0.55 s ember warning, then 1.6 s of flame ±32 px — run |
+| Gate slam | lever floors, waiters | gate shuts 5 / 3.5 / 2.5 s after opening; levers reset |
+
+A trapped lever's knob is copper instead of gold (the original's tell).
+
+### The castle remembers (deterministic port of `mergeRun` / `buildPlan`)
+
+Memory counters (x100 fixed point) persist across runs: doors L/R, levers L/R,
+pulls, rush/wait, confronted/avoided, trap deaths. Each run end: decay x0.8 (the
+death's own category is exempt), add the run x100 (x200 on escape), update pressure
+0..3 per category, rebuild. `tier = min(3, 1 + pressure)` once a habit is detected
+(`favored()`: total >= 0.9, gap >= 0.9, share >= 60%).
+
+| Habit | Tier 1 | Tier 2 | Tier 3 |
+|---|---|---|---|
+| Door side P | F1 spikes in P corridor; F3 other door left open (gift); F3 guard in P corridor | F3 P spikes retract; F1 P door moves tight | F1 P-corridor guard; F3 P door bricked |
+| Lever side P | F4 P lever is a trap | F2 P lever is a dud | F2 P trap; F4 other lever raises the alarm |
+| Rush | guards x1.35 | ambush at the F3 ladder top; Wraith covers F5 ladder | spikes flank the F2 centre ladder |
+| Wait | gates slam after 5 s | 3.5 s, spikes stay up longer | 2.5 s; Wraith patrols all of F5 |
+| Confront (brace) | shoves stun 1.2 s | Wraith armoured | every guard heavy |
+| Avoid (watch) | guards chase | patrols widen | Stone Watcher on F4 |
+| Trap deaths | F3 spikes widen | spikes on F4 | spikes by the exit |
+| Escapes | — | 1: exit moves away from favoured RIGHT | 2: Stone Watcher guards the exit |
+
+Softlock rule (from the original): only the favoured side / trusted lever is ever
+hardened, so the other door and the other lever always work.
+
+**Visible adaptation:** HUD top-left = floors (gold current, grey visited); top-right =
+five categories x three pips (orange doors, gold levers, cyan pace, red guards, purple
+traps). Entering a floor the castle changed for you pulses the background ember red.
+
+### Verification
+
+| Check | How | Result |
+|---|---|---|
+| 13 scripted playtests (controls, full escape, retreat, gate, death, shove, all five memory categories, 15-run campaign) | `tools/test_gate7.py` under `tools/jagsim.py` | 13/13 PASS |
+| Softlock hunt: 15 consecutive rebuilt castles, random habits | `campaign` scenario | 0 stuck; 13 escapes / 2 deaths across escalating castles |
+| 20,000 frames random input, invariants every frame | `tools/soak_gate7.py` | 0 violations |
+| CPU budget (pessimistic 18 instr/halfline) | soak probe | logic done ~68 halflines after blank (max 325; deadline 525) |
+| Real Virtual Jaguar v2.1.3 R5 | `tools/vj_drive.ps1` + F8 framebuffer shots | F1 → door → ladder → F2 → lever → gate, death → rebuilt castle with HUD pips and adapted spikes; every frame drawn |
+
+### Bugs found in the Gate 6 foundation (fixed in Gate 7; Gate 6 untouched)
+
+1. **Every other frame was blank in Virtual Jaguar.** VJ sets VC bit 11 on alternate
+   fields (`jaguar.cpp`, `HalflineCallback`: `vc = lowerField ? 0x0800 : 0`). The raw
+   `cmp.w #507,VC` saw "blank" for the whole odd field, so the list was refreshed every
+   2nd frame and the game ran at 30 Hz. Fix: `and.w #$07FF` before comparing. The
+   harness now models the bit and reproduces Gate 6 as `[0, 3852, 0, 3852, …]` pixels.
+2. **XPOS origin.** XPOS 0 is the left edge (Tech Ref p.18; VJ screenshot confirms);
+   Gate 6's XPOS_MIN=177 (=HDB1) put the castle's right half off-screen. Gate 7 XORG=0.
+3. **Floors 2/3 drawn at the wrong height** (`$0380` = 112 halflines, not 280; `$01B8`
+   = 55, not 140). Gate 7 builds every phrase at runtime from symbolic fields.
+4. **PIX_ENEMY ($9000) overlapped PIX_FLOOR** ($8000+5120): skull pixels in the floor.
+   Gate 7 copies all art to PIXBASE $010000 back to back, no overlaps.
+5. **`btst #4,CONFIG` tests $F14002's high byte** (bit 12 of JOYBUTS). Bob's own
+   videoinit.inc tests `$F14003`. Works in VJ only because that byte reads $FF. Kept
+   verbatim in Gate 7 (protected startup) — Bob to decide.
+6. **RMAC has no operator precedence** — `FSPIKE+2*16` assembles as `(FSPIKE+2)*16`.
+   Every product in Gate 7 is parenthesised.
+7. **Palette:** under VJ's real CRY tables Bob's "steel grey" $CE7B is olive, "shadow"
+   $3601 and most hero colours are near-black, and the skull's $F001 is black. Left as
+   is (Kimi's area); placeholder art uses colours picked against the real tables.
+
+### Build
+
+```sh
+sh tools/build_gate7.sh          # mkart.py -> rmac -> rln (Bob's Gate 6 link line)
+python tools/test_gate7.py       # scripted playtests (needs: pip install unicorn pillow)
+python tools/soak_gate7.py 20000 1 18
+```
+
+```powershell
+.\bin\rmac.exe -fb -m68000 -o gate7_castle\gate7_castle.o gate7_castle\gate7_castle.s
+.\bin\rln.exe -a 802000 r r -e -o gate7_castle\gate7_castle.cof gate7_castle\gate7_castle.o
+```
