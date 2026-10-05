@@ -87,5 +87,17 @@ python tools/enemy_family_24.py    # enemies
 python tools/prop_family.py        # props
 python tools/backdrop_family.py    # bands
 python tools/adaptation_states.py  # decals + escalation sheet (imports the above)
+python tools/font_family.py        # V6 font (imports backdrop_family)
 ```
 All deterministic (seeded); re-running reproduces the committed files.
+
+## 7. V6 castle-voice font (`docs/visual/sprites/font_data.s`)
+- 54 glyphs: A–Z, 0–9, `. , : ; ! ? - + / % ( )`, space, ellipsis, 4 arrows.
+- Contract for Claude: cell 6×8, advance 6 px, line pitch 10 px; 7 bytes per
+  glyph (bit 4 = leftmost column); index = position in FONT_ORDER (documented in
+  the fragment header). Face `FONT_FACE=$98BD`, relief `FONT_RELIEF=$3601`.
+- Longest canon whisper ("IT KNOWS WHICH LEVER YOU TRUST") = 179 px of 320 ✓.
+- CPU-render bitmask format matches how the HUD is drawn; no OP bitmap needed.
+- Mockups at true 320×240 (shown 2×): `v6_mock_whisper/title/rebuild/end.png`.
+- **Bob Checkpoint B**: new runtime asset — buffer choice and render approach
+  (HUD-style CPU buffer vs dedicated text band) are Bob's to approve.
