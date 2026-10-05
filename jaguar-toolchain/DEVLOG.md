@@ -322,3 +322,450 @@ Zero warnings, zero errors on assemble and link.
 | `gate2/screenshot_phaseB.jpg` | Phase B pass |
 | `gate2/screenshot_phaseB2.jpg` | Phase B pass 2 |
 
+
+---
+
+## Gate 3 — First Playable Floor
+
+### Source: `gate3_floor/gate3_floor.s`
+
+Builds directly on the proven Phase C path (`gate3/gate3.s`).
+**No gate2/gate3 rendering or controller code was modified.**
+
+#### What Gate 3 adds
+
+| Addition | Detail |
+|---|---|
+| Castle stone floor BITMAP | 320×8 px CRY16, YPOS row 210, full-width platform |
+| Hero YPOS variable | stored at DRAM `$000102` (word, halflines); updated per frame |
+| TRANS flag on hero BITMAP | PH1_HI bit 15 (`$00008000`) = phrase bit 47; `$0000` hero pixels are transparent |
+| Gravity + floor collision | `yvel += 2` per frame; clamp `ypos = 372` when landing |
+| Two-object OP list | floor BITMAP → hero BITMAP → STOP (floor behind hero) |
+
+#### Object list layout (`$004000`)
+
+```
+$004000  floor BITMAP phrase 0  PH0_HI=$00800008  PH0_LO=$02020D20  (static, refreshed each blank)
+$004008  floor BITMAP phrase 1  PH1_HI=$00000005  PH1_LO=$0140C0B1  (XPOS=177,DEPTH=4,DWIDTH=80)
+$004010  hero  BITMAP phrase 0  PH0_HI=$00940008  PH0_LO=dynamic    (YPOS rebuilt each frame)
+$004018  hero  BITMAP phrase 1  PH1_HI=$00008000  PH1_LO=dynamic    (XPOS rebuilt; TRANS phrase bit 47)
+$004020  STOP  phrase 0         $00000000/$00000004
+$004028  STOP  phrase 1         $00000000/$00000000
+```
+
+#### DRAM state map
+
+| Address | Symbol | Size | Initial |
+|---|---|---|---|
+| `$000100` | `HERO_XPOS` | word | 257 (screen centre) |
+| `$000102` | `HERO_YPOS` | word (halflines) | 372 (standing on floor) |
+| `$000104` | `HERO_YVEL` | signed word (hl/frame) | 0 |
+| `$008000` | `PIX_FLOOR` | 5120 bytes | 320×8 CRY16 stone tiles |
+| `$009400` | `PIX_HERO`  | 768 bytes | 16×24 CRY16 hero (verbatim gate3) |
+
+#### Floor geometry
+
+- NTSC display rows 0–239; floor top at **row 210**, YPOS halfline = `420`.
+- Hero height = 24 rows = 48 halflines; hero YPOS when standing = `420 − 48 = 372`.
+- `FLOOR_YPOS = 372` is the clamp value in the physics loop.
+- Floor XPOS = 177 (left display edge), width = 320 px → covers hero walk range 177–486.
+
+#### TRANS flag — corrected bit position
+
+The BITMAP object's second phrase (PH1) has FLAGS at the high longword (PH1_HI = phrase bits [63:32]).
+TRANS is at **phrase bit 47** = PH1_HI bit 15 → `$00008000`.
+
+Prior draft had `$00000020` (phrase bit 37) which is within the IWIDTH field, not TRANS.
+
+#### D0 construction for dynamic PH0_LO
+
+`MOVE.W` only writes the low 16 bits of D0; the upper 16 bits are not cleared.
+Sequence used everywhere a dynamic PH0_LO is built:
+
+```asm
+moveq   #0,d0             ; clear full 32 bits
+move.w  ypos_hl,d0        ; load YPOS halflines into low word
+lsl.l   #3,d0             ; shift into bits[13:3] — LSL.L keeps upper half clean
+or.l    #HERO_PH0_LO_MSK,d0  ; merge static LINK/HEIGHT bits
+move.l  d0,OP_LIST+n      ; write clean longword
+```
+
+`LSL.L` (not `LSL.W`) is mandatory: `LSL.W` shifts only bits [15:0] and leaves bits [31:16] unchanged.
+
+#### Per-frame loop
+
+```
+forever:
+  1. wait VC > 507        (end of active picture → blanking)
+  2. write $817E → JOYSTICK; read back (Row 0 D-pad, active-LOW)
+     btst #10,d0 → LEFT?  sub #2 from xpos, clamp XPOS_MIN=177
+     btst #11,d0 → RIGHT? add #2 to xpos,  clamp XPOS_MAX=486
+     store xpos
+  3. yvel += GRAVITY(2); ypos += yvel
+     if ypos >= 372: ypos=372, yvel=0   (floor collision)
+     store ypos, yvel
+  4. rebuild hero PH0_LO = $04060000 | (ypos<<3); write PH0_HI/LO → OP_LIST+16/20
+  5. rebuild hero PH1_LO = $4010C000 | (xpos&$FFF); write PH1_HI/LO → OP_LIST+24/28
+  6. refresh floor PH0_HI/LO → OP_LIST+0/4  (OP zeroes HEIGHT each frame)
+  7. wait VC < 507        (new frame started)
+  8. bra forever
+```
+
+#### Build commands
+
+```powershell
+cd C:\Users\Owner\.bob\playground\jaguar-toolchain
+
+# Assemble
+.\bin\rmac.exe -fb -m68000 -o gate3_floor\gate3_floor.o gate3_floor\gate3_floor.s
+
+# Link -> COF (emulator)
+.\bin\rln.exe -a 802000 x x -e -o gate3_floor\gate3_floor.cof gate3_floor\gate3_floor.o
+```
+
+#### Binary metrics
+
+| File | COF size | Notes |
+|---|---|---|
+| `gate3\gate3.cof` | 1440 B | Phase C baseline (controller only) |
+| `gate3_floor\gate3_floor.cof` | 6712 B | +5272 B: floor pixel data (5120 B) + new code |
+
+Zero warnings, zero errors on assemble and link.
+
+#### Runtime verification — PASS ✅
+
+Tested in Virtual Jaguar v2.1.3 R5, NTSC mode, keyboard controller:
+
+| Check | Result |
+|---|---|
+| Hero visible at screen centre | ✅ |
+| Floor visible at row 210 (stone texture with mortar lines) | ✅ |
+| Hero standing on floor surface (YPOS clamp working) | ✅ |
+| Z key → hero moves LEFT; hits left clamp at XPOS=177 | ✅ |
+| C key → hero moves RIGHT; hits right clamp at XPOS=486 | ✅ |
+| No rendering corruption or black screen | ✅ |
+
+
+---
+
+## Gate 4 — Vertical Slice
+
+### Source: `gate4_slice/gate4_slice.s`
+
+Builds directly on Gate 3 (`gate3_floor.s`). All proven rendering, controller,
+and physics code preserved verbatim. Adds jump, an autonomous enemy, and
+collision-triggered hero reset.
+
+#### What Gate 4 adds
+
+| Addition | Detail |
+|---|---|
+| Jump | Row 0 bit 8 (S key in VJ); `yvel = -14` hl/frame when grounded; gravity returns hero to floor |
+| Enemy BITMAP | 16×16 CRY16 skull sprite at `PIX_ENEMY ($009000)`; bounces XPOS 177–478 at 2 px-clocks/frame |
+| Collision + reset | AABB: `|Δx| < 16` AND `|Δy| < 20` (halflines) → hero snaps to `XPOS_START=257, YPOS=372` |
+
+#### Object list layout (`$004000`)
+
+```
+$004000  floor  BITMAP PH0/PH1   (PH0 refreshed each blank; PH1 static)
+$004010  enemy  BITMAP PH0/PH1   (PH0 refreshed; PH1_LO dynamic XPOS)
+$004020  hero   BITMAP PH0/PH1   (PH0 dynamic YPOS; PH1 dynamic XPOS; TRANS)
+$004030  STOP   PH0/PH1
+```
+
+Order matters: floor → enemy → hero → STOP draws floor behind enemy behind hero.
+
+#### DRAM state map
+
+| Address | Symbol | Size | Initial |
+|---|---|---|---|
+| `$000100` | `HERO_XPOS` | word | 257 |
+| `$000102` | `HERO_YPOS` | word (halflines) | 372 |
+| `$000104` | `HERO_YVEL` | signed word | 0 |
+| `$000106` | `ENEMY_XPOS` | word | 350 |
+| `$000108` | `ENEMY_DIR` | word (+2 or -2) | +2 |
+| `$008000` | `PIX_FLOOR` | 5120 bytes | 320×8 CRY16 stone (verbatim) |
+| `$009000` | `PIX_ENEMY` | 512 bytes | 16×16 CRY16 skull sprite |
+| `$009400` | `PIX_HERO` | 768 bytes | 16×24 CRY16 hero (verbatim) |
+
+#### Jump logic
+
+```asm
+btst    #8,d0           ; Up button, active-LOW
+bne.s   .physics        ; not pressed
+cmp.w   #FLOOR_YPOS,d2  ; hero must be grounded
+bne.s   .physics
+tst.w   d3              ; and yvel must be zero
+bne.s   .physics
+move.w  #JUMP_VEL,d3    ; JUMP_VEL = -14 halflines/frame
+```
+
+Double-grounded check (`ypos == FLOOR_YPOS AND yvel == 0`) prevents
+double-jumps or air re-triggers.
+
+#### Enemy AI
+
+```
+each frame:
+  enemy_xpos += enemy_dir
+  if enemy_xpos <= ENEMY_XMIN: enemy_xpos = ENEMY_XMIN; enemy_dir = +2
+  if enemy_xpos >= ENEMY_XMAX: enemy_xpos = ENEMY_XMAX; enemy_dir = -2
+```
+
+#### Collision + reset
+
+```
+delta_x = |hero_xpos - enemy_xpos|
+delta_y = |hero_ypos - ENEMY_YPOS_HL|
+if delta_x < 16 AND delta_y < 20:
+    hero_xpos = XPOS_START (257)
+    hero_ypos = FLOOR_YPOS (372)
+    hero_yvel = 0
+```
+
+#### Build commands
+
+```powershell
+cd C:\Users\Owner\.bob\playground\jaguar-toolchain
+
+.\bin\rmac.exe -fb -m68000 -o gate4_slice\gate4_slice.o gate4_slice\gate4_slice.s
+.\bin\rln.exe -a 802000 r r -e -o gate4_slice\gate4_slice.cof gate4_slice\gate4_slice.o
+```
+
+Zero warnings, zero errors on assemble and link.
+
+#### Runtime verification — PASS ✅
+
+Tested in Virtual Jaguar v2.1.3 R5, NTSC mode, keyboard controller:
+
+| Check | Result |
+|---|---|
+| Hero visible, standing on floor | ✅ |
+| Enemy visible, bouncing left/right on floor | ✅ |
+| Z = LEFT, C = RIGHT, clamps working | ✅ |
+| S = JUMP — hero launches upward and returns to floor | ✅ |
+| Hero touches enemy → snaps to centre start position | ✅ |
+| Enemy continues moving after hero reset | ✅ |
+| No rendering corruption or black screen | ✅ |
+
+---
+
+## Gate 5 — Adaptive Memory: The Castle Remembers
+
+### Source: `gate5_memory/gate5_memory.s`
+
+Builds directly on Gate 4 (`gate4_slice.s`). All Gate 4 code preserved verbatim.
+One new system: **side-bias tracking** that persists across respawn and deterministically
+alters the enemy's spawn position and speed on the next life.
+
+#### Design
+
+The castle tracks one player tendency per life: which half of the screen the hero
+occupies most. On death it uses that record to place the enemy on the side the hero
+was hiding, approaching faster than before.
+
+#### New DRAM state
+
+| Address | Symbol | Size | Initial | Purpose |
+|---|---|---|---|---|
+| `$00010A` | `SIDE_BIAS` | signed word | 0 | Cumulative left/right tendency this life |
+| `$00010C` | `DEATH_COUNT` | word | 0 | How many times hero has died this session |
+
+All Gate 4 DRAM (`$000100`–`$000108`) and object list layout unchanged.
+
+#### Per-frame bias update (while hero is alive)
+
+```asm
+cmp.w   #SCREEN_MID,d1      ; SCREEN_MID = 332 pixel-clocks
+bge.s   .bias_right
+sub.w   #1,SIDE_BIAS         ; left of centre -> bias toward left
+bra.s   .bias_done
+.bias_right:
+add.w   #1,SIDE_BIAS         ; right of centre -> bias toward right
+```
+
+`SCREEN_MID = 332` is the midpoint of the 177–486 walk range.
+Running at 60 fps, 1 second fully left = −60 bias; 1 second fully right = +60.
+
+#### On death sequence
+
+```
+1. DEATH_COUNT++
+2. adapted_speed = ENEMY_SPEED + DEATH_COUNT  (capped at ADAPT_SPEED_MAX=6)
+3. if SIDE_BIAS < 0:  enemy_xpos = ENEMY_XMIN(177);  enemy_dir = +adapted_speed
+   if SIDE_BIAS >= 0: enemy_xpos = ENEMY_XMAX(478);  enemy_dir = -adapted_speed
+4. SIDE_BIAS = 0
+5. hero reset: xpos=257, ypos=372, yvel=0  (identical to Gate 4)
+```
+
+#### Speed escalation table
+
+| Death # | Speed |
+|---|---|
+| 0 (first life) | 2 (base) |
+| 1 | 3 |
+| 2 | 4 |
+| 3 | 5 |
+| 4+ | 6 (cap) |
+
+#### Build commands
+
+```powershell
+cd C:\Users\Owner\.bob\playground\jaguar-toolchain
+
+.\bin\rmac.exe -fb -m68000 -o gate5_memory\gate5_memory.o gate5_memory\gate5_memory.s
+.\bin\rln.exe -a 802000 r r -e -o gate5_memory\gate5_memory.cof gate5_memory\gate5_memory.o
+```
+
+Zero warnings, zero errors on assemble and link.
+
+#### Runtime verification — PASS ✅
+
+Tested in Virtual Jaguar v2.1.3 R5, NTSC mode, keyboard controller:
+
+| Check | Result |
+|---|---|
+| Run 1: enemy starts centre-right, speed 2, normal behaviour | ✅ |
+| Hero side-bias recorded during play (left/right half tracking) | ✅ |
+| Death/respawn triggers — hero resets to centre | ✅ |
+| Run 2: enemy spawns from the side hero was hugging | ✅ |
+| Run 2: enemy visibly faster than run 1 | ✅ |
+| Same bias pattern produces same spawn side and speed | ✅ |
+| All Gate 4 behaviour preserved (Z/C/S/gravity/collision) | ✅ |
+| No rendering corruption or black screen | ✅ |
+
+## Gate 6 — Three-Floor Castle
+
+### Source: `gate6_castle/gate6_castle.s`
+
+Builds directly on Gate 5 (`gate5_memory.s`). All Gate 5 systems preserved verbatim.
+Adds a three-floor vertical castle layout, ladder zone transitions, a second enemy on
+the top floor, and an escape/WIN state with a gold BG flash.
+
+#### What Gate 6 adds
+
+- Three distinct floors all visible simultaneously as stacked horizontal platforms
+- Instant grounded-touch ladder transitions between floors
+- Enemy2 on Floor 3, hidden while hero is on Floors 1–2, adaptive on entry
+- WIN state: gold BG flash (180 frames) then soft-reset to Floor 1
+- `FLOOR_NUM`, `ENEMY2_XPOS`, `ENEMY2_DIR`, `WIN_TIMER` added to DRAM
+- `do_death` subroutine refactored to adapt both Enemy1 and Enemy2 simultaneously
+
+#### Floor layout (NTSC rows 0–239)
+
+| Floor | Screen row | YPOS_HL | Hero YPOS | Purpose |
+|---|---|---|---|---|
+| Floor 1 | 210 | 420 | 372 | Choice / Observation |
+| Floor 2 | 140 | 280 | 232 | Lever / Escalation |
+| Floor 3 | 70 | 140 | 92 | Exit / Judgment |
+
+All three floor BITMAPs share the same `PIX_FLOOR` pixel data (`$008000`).
+Floor PH1_LO is identical for all floors — only YPOS and LINK differ in PH0.
+
+#### Ladder zones (grounded = `yvel==0` and `ypos==floor_ypos`)
+
+| Zone | Condition | Result |
+|---|---|---|
+| F1 → F2 | xpos ≥ 460, grounded on Floor 1 | FLOOR_NUM=2, ypos=232, xpos=177 |
+| F2 → F3 | xpos ≤ 194, grounded on Floor 2 | FLOOR_NUM=3, ypos=92, xpos=486 |
+| F3 → WIN | xpos ≥ 460, grounded on Floor 3 | WIN_TIMER=180, BG=$CFCB |
+
+The grounded test (`tst.w d3 / bne .no_ladder`) prevents mid-air trigger.
+
+#### Object list layout (`$004000`)
+
+| Offset | Object | PH0_HI | LINK (>>3) |
+|---|---|---|---|
+| `+$00` | floor1 BITMAP | `$00800008` | `$000802` → floor2 |
+| `+$10` | floor2 BITMAP | `$00800008` | `$000804` → floor3 |
+| `+$20` | floor3 BITMAP | `$00800008` | `$000806` → enemy1 |
+| `+$30` | enemy1 BITMAP | `$00900008` | `$000808` → enemy2 |
+| `+$40` | enemy2 BITMAP | `$00900008` | `$00080A` → hero |
+| `+$50` | hero BITMAP | `$00940008` | `$00080C` → STOP |
+| `+$60` | STOP | `$00000000` | — |
+
+Enemy visibility is controlled by HEIGHT in PH0_LO:
+- `E1_PH0_LO` = `$08040BB8` (HEIGHT=16, shown)
+- `E1_PH0_LO_HIDE` = `$08000BB8` (HEIGHT=0, hidden)
+- `E2_PH0_LO` = `$0A040360` (HEIGHT=16, shown)
+- `E2_PH0_LO_HIDE` = `$0A000360` (HEIGHT=0, hidden)
+
+OP skips objects with HEIGHT=0, so hidden enemies consume no scanlines.
+
+#### DRAM state map (extends Gate 5)
+
+| Address | Symbol | Size | Notes |
+|---|---|---|---|
+| `$000100` | HERO_XPOS | word | |
+| `$000102` | HERO_YPOS | word | halflines |
+| `$000104` | HERO_YVEL | signed word | |
+| `$000106` | ENEMY1_XPOS | word | |
+| `$000108` | ENEMY1_DIR | signed word | |
+| `$00010A` | SIDE_BIAS | signed word | per-life accumulator |
+| `$00010C` | DEATH_COUNT | word | session total |
+| `$00010E` | FLOOR_NUM | word | 1, 2, or 3 |
+| `$000110` | ENEMY2_XPOS | word | |
+| `$000112` | ENEMY2_DIR | signed word | |
+| `$000114` | WIN_TIMER | word | counts down from 180 |
+
+#### do_death subroutine
+
+Called via `bsr do_death` on any collision on any floor. Returns with d1/d2/d3/d6
+updated to Floor 1 start position so the main loop continues cleanly.
+
+```
+1. DEATH_COUNT++
+2. adapted_speed = ENEMY_SPEED + DEATH_COUNT  (cap ADAPT_SPEED_MAX=6)
+3. if SIDE_BIAS < 0:  both enemies spawn at XMIN(177), dir = +adapted_speed
+   if SIDE_BIAS >= 0: both enemies spawn at XMAX(478), dir = -adapted_speed
+4. SIDE_BIAS = 0
+5. hero reset: xpos=257, ypos=F1_YPOS(372), yvel=0, FLOOR_NUM=1
+6. registers d1=257, d2=372, d3=0, d6=1 written back to DRAM
+```
+
+#### WIN state flash
+
+```asm
+btst    #0,d7           ; alternating gold/black on odd/even countdown frames
+beq.s   .win_dark
+move.w  #BG_WIN,BG      ; $CFCB — gold
+bra.s   .win_tick
+.win_dark:
+move.w  #BG_VAL,BG      ; $0000 — black
+.win_tick:
+sub.w   #1,d7
+move.w  d7,WIN_TIMER
+bne.s   .win_refresh_op ; skip gameplay, keep OP refreshed
+; on zero: reset to Floor 1
+```
+
+Floor PH0s are still refreshed during WIN countdown (OP zeroes HEIGHT every frame).
+
+#### Build commands
+
+```powershell
+cd C:\Users\Owner\.bob\castle-remembers-jaguar\jaguar-toolchain
+
+.\bin\rmac.exe -fb -m68000 -o gate6_castle\gate6_castle.o gate6_castle\gate6_castle.s
+.\bin\rln.exe -a 802000 r r -e -o gate6_castle\gate6_castle.cof gate6_castle\gate6_castle.o
+```
+
+Zero warnings, zero errors on assemble and link.
+
+#### Runtime verification — PENDING ⏳
+
+Owner must load `gate6_castle.cof` in Virtual Jaguar v2.1.3 R5 (NTSC) and verify:
+
+| Check | Result |
+|---|---|
+| Hero visible on Floor 1, standing, gravity working | ⏳ |
+| Z=LEFT, C=RIGHT, S=JUMP, clamps working | ⏳ |
+| Enemy1 bouncing on Floor 1; collision resets hero | ⏳ |
+| Walk right edge on Floor 1 (grounded) → Floor 2 transition | ⏳ |
+| Floor 2 is enemy-free | ⏳ |
+| Walk left edge on Floor 2 (grounded) → Floor 3 transition | ⏳ |
+| Enemy2 visible and bouncing on Floor 3 | ⏳ |
+| Enemy2 collision resets hero to Floor 1 | ⏳ |
+| Walk right edge on Floor 3 (grounded) → gold flash + Floor 1 reset | ⏳ |
+| Die repeatedly; speed and spawn side adapt per SIDE_BIAS | ⏳ |
+| No corruption, no black screen, stable 59.9 FPS | ⏳ |

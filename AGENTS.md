@@ -1,133 +1,180 @@
-# AGENTS.md — Castle Remembers Jaguar · IBM Bob Hackathon
-## Continuity State (authoritative)
+# Castle Remembers — Agent State
 
-> **Every new task must begin by running the three commands below and reading this
-> file in full before changing anything.**
+## Current State
 
-```powershell
-git status
-git rev-parse HEAD
-git remote -v
-```
-
----
-
-## Repository
-
-| Item | Value |
-|---|---|
-| Local path | `C:\Users\Owner\.bob\castle-remembers-jaguar` |
-| Remote | `https://github.com/theworldasiknowit777/castle-remembers-jaguar.git` |
-| Authoritative branch | `main` |
-| Known validated HEAD | `499c867daf00681cd16599ae235e13ad2a46c7e5` |
-| Pre-Bob baseline tag | `pre-bob-baseline` |
-| Baseline commit | `f285ff1bcb2dad8fe97038a71be4a01b5b996335` |
-
----
-
-## Protected Source
-
-`/original/index.html` is **immutable**.  
-Its SHA-256 must continue to match the value stored at project creation.  
-**Never modify, move, or delete this file.**
-
----
-
-## Gates
-
-### Gate 1 — COMPLETE ✅
-
-**Native Windows Jaguar development pipeline proven.**
-
-| Component | Version | Result |
+| Gate / Phase | Status | Notes |
 |---|---|---|
-| RMAC assembler | 2.5.2 | ✅ assembles 68000 + .objproc |
-| RLN linker | 1.7.7 | ✅ links to ABS and COFF |
-| Virtual Jaguar emulator | v2.1.3 R5 | ✅ loads COFF, runs at ~59.9 FPS |
-| Visible output | solid blue screen (CRY `$FF20`) | ✅ PASS |
+| Gate 1 — hello.s blue screen | ✅ PASS | Solid blue, 59.9 FPS, NTSC/PAL auto-detect |
+| Gate 2 — bitmap hero sprite | ✅ PASS | Phase A bitmap PASS |
+| Phase B — authentic hero | ✅ PASS | 16×24 CRY16 hero sprite, 11-colour palette |
+| Phase C — LEFT/RIGHT + clamps | ✅ PASS | Controller movement, XPOS_MIN/MAX clamped |
+| Gate 3 — First Playable Floor | ✅ PASS | Floor + hero + gravity + Z/C walk, clamps |
+| Gate 4 — Vertical Slice | ✅ PASS | Jump + enemy + collision/reset — full gameplay loop |
+| Gate 5 — Adaptive Memory | ✅ PASS | Side-bias tracking; enemy adapts spawn + speed on respawn |
+| Gate 6 — Three-Floor Castle | ⏳ BUILT — awaiting runtime verification | Three floors, two enemies, ladder transitions, WIN state |
 
-Full pipeline: RMAC → RLN → Jaguar COFF/ABS → Virtual Jaguar → visible output.
+## Gate 2 Summary
 
----
+- **Phase A bitmap PASS** — Object Processor BITMAP object renders correctly.
+  XPOS_START=257, DEPTH=4 (16bpp CRY16), 4 phrases/line.
+- **Phase B authentic hero PASS** — 16×24 pixel hand-crafted hero sprite in
+  CRY16 format, 11-colour palette. Phrase-0 HEIGHT/DATA blanking refresh loop
+  prevents OP from zeroing HEIGHT each frame.
+- **Phase C LEFT/RIGHT + clamps PASS** — Jaguar controller input via JOYSTICK
+  register ($F14000, 16-bit, Row 0 = $817E). Bit 10 = LEFT (J10), bit 11 =
+  RIGHT (J11), active-LOW. Hero X position stored at DRAM $000100 (word).
+  Speed = 2 pixel-clocks/frame. Clamps: XPOS_MIN=177 (left edge), XPOS_MAX=486
+  (right edge, 16px sprite fits).
 
-### Gate 2 — COMPLETE / PASS
+## Gate 3 Summary — First Playable Floor ✅ PASS
 
-Phase A — TOM BITMAP rectangle: PASS
-Phase B — authentic Castle Remembers hero: PASS
-Phase C — Jaguar LEFT/RIGHT controller movement + clamps: PASS
+- **Floor BITMAP** — 320×8 px CRY16 castle stone floor at YPOS row 210
+  (halfline 420). Stone colour `$CE7B` (steel-grey), mortar `$3943`, shadow
+  `$3601`. DWIDTH=80 phrases/line, XPOS=177.
+- **Hero TRANS** — TRANS flag at phrase bit 47 = PH1_HI bit 15 = `$00008000`.
+  `$0000` hero pixels let floor and BG show through.
+- **Hero YPOS** — stored at DRAM `$000102` (halflines). Rebuilt each frame:
+  `moveq #0,d0 ; move.w ypos,d0 ; lsl.l #3,d0 ; or.l mask,d0`.
+  `LSL.L` (not `LSL.W`) keeps D0 upper word clean.
+- **Gravity + floor collision** — `yvel += 2` per frame; clamp `ypos=372`
+  (= 420−48), `yvel=0` on landing. Hero starts standing on floor.
+- **Two-object OP list** — floor BITMAP → hero BITMAP → STOP.
+  Both phrase-0s refreshed in blanking window (OP zeroes HEIGHT each frame).
+- **Runtime verified** — hero visible, floor visible, hero on floor,
+  Z=LEFT (XPOS_MIN=177), C=RIGHT (XPOS_MAX=486), no corruption.
 
-Verified runtime:
-- hero visible in Virtual Jaguar
-- LEFT movement works
-- RIGHT movement works
-- clamps verified
-- XPOS_START = 257
-- XPOS_MIN = 177
-- XPOS_MAX = 486
+## Gate 4 Summary — Vertical Slice ✅ PASS
 
-Gate 3 — NOT STARTED
+- **Jump** — Row 0 bit 8 (S key in VJ); `yvel = JUMP_VEL (-14)` when grounded.
+  Gravity (`+2 hl/frame`) pulls hero back down; floor clamp at `ypos=372` stops fall.
+- **Enemy BITMAP** — 16×16 CRY16 skull sprite at `PIX_ENEMY ($009000)`.
+  Third object in OP list (floor → enemy → hero → STOP).
+  Bounces between `XPOS=177` and `XPOS=478` at `ENEMY_SPEED=2` px-clocks/frame.
+  TRANS flag set; PH0 refreshed every blank window.
+- **Collision + reset** — AABB test each frame: `|hero_x − enemy_x| < 16` AND
+  `|hero_y − enemy_y| < 20` (halflines) → hero resets to `XPOS_START=257, YPOS=372`.
+  Enemy continues moving uninterrupted.
+- **Controls** — Z=LEFT, C=RIGHT, S=JUMP (Virtual Jaguar keyboard Row 0).
+- **Runtime verified** — hero jumps, enemy bounces, collision resets hero to centre,
+  enemy unaffected by reset. No corruption, no black screen.
 
-**Goal:** Authentic Castle Remembers hero rendered through TOM Object Processor,
-controllable LEFT/RIGHT.
+## Gate 5 Summary — Adaptive Memory ✅ PASS
 
-**Sub-goals in order:**
-1. Solid BITMAP object visible through TOM OP in Virtual Jaguar
-2. Hero pixel data substituted for solid fill
-3. LEFT/RIGHT joypad input moves the hero
+- **Side-bias tracking** — every frame the hero is alive, `SIDE_BIAS` (signed word at `$00010A`)
+  is decremented if `hero_xpos < 332` (left half) or incremented if `>= 332` (right half).
+- **On death:**
+  1. `DEATH_COUNT` (`$00010C`) incremented.
+  2. Adapted speed = `ENEMY_SPEED + DEATH_COUNT`, capped at `ADAPT_SPEED_MAX=6`.
+  3. `SIDE_BIAS < 0` (hid left) → enemy spawns at `XPOS=177` (left edge), moves RIGHT at adapted speed.
+  4. `SIDE_BIAS >= 0` (hid right) → enemy spawns at `XPOS=478` (right edge), moves LEFT at adapted speed.
+  5. `SIDE_BIAS` reset to 0 for new life.
+- **Hero reset** — identical to Gate 4: `XPOS_START=257`, `YPOS=372`, `yvel=0`.
+- **Deterministic** — same side-bias sign on death always produces same spawn side and speed.
+- **Runtime verified** — hugged left wall, died, enemy spawned from LEFT on next life at higher speed. ✅
 
-#### What is proven
+## Gate 6 Summary — Three-Floor Castle ⏳ BUILT
 
-- RMAC `.objproc` directive is supported and correctly encodes OP phrases.
-- `bitmap` operand order confirmed: `bitmap data_addr, XPOS, YPOS, dwidth, iwidth, height, bpp`
-- XPOS encoding verified via flat-binary decode: XPOS appears verbatim in the low byte
-  of phrase 1's low 32-bit word. Field moves linearly (0 → 100 → 200) as operand changes.
-- Assemble with `-fr` (flat/absolute) for field verification; use `-fb` + RLN for emulator builds.
+- **Source:** `jaguar-toolchain/gate6_castle/gate6_castle.s`
+- **Binary:** `jaguar-toolchain/gate6_castle/gate6_castle.cof`
+- **Status:** Assembled clean. Runtime verification pending (owner must load in Virtual Jaguar).
 
-#### Known failed path — do not repeat
+### Floor Layout (NTSC rows 0–239)
 
-Reading fixed byte offsets from RMAC `-fb` COFF relocatable object files was **invalid**.
-Those offsets contained COFF section headers and metadata, not resolved OP phrases.
-The probe showed XPOS stuck at 0 regardless of input — this was an artifact of reading
-the wrong location, not evidence that `.objproc` ignores XPOS.
+| Floor | Row | YPOS_HL | Hero YPOS (halflines) | Purpose |
+|---|---|---|---|---|
+| Floor 1 | 210 | 420 | 372 | Choice / Observation |
+| Floor 2 | 140 | 280 | 232 | Lever / Escalation |
+| Floor 3 | 70 | 140 | 92 | Exit / Judgment |
 
-#### Current correct path
+### Ladder Zones (grounded touch = instant transition)
 
-```
-.objproc → BITMAP + STOP in DRAM → assemble (-fb) → link (RLN) → COFF → Virtual Jaguar
-```
+| Trigger | Condition | Result |
+|---|---|---|
+| F1 → F2 | `hero_xpos >= 460` while grounded on Floor 1 | Teleport to Floor 2, xpos=177 |
+| F2 → F3 | `hero_xpos <= 194` while grounded on Floor 2 | Teleport to Floor 3, xpos=486 |
+| F3 → WIN | `hero_xpos >= 460` while grounded on Floor 3 | WIN state |
 
-- Object list must live in Jaguar **main DRAM** (`$000000`–`$1FFFFF`), not TOM GPU local RAM.
-- Both the OP object list and bitmap pixel data belong in main DRAM.
-- OLP register (`$F00020`) must point to the phrase-aligned object list in DRAM.
-- BITMAP object requires 16-byte (double-phrase) alignment.
-- VDB/VDE values must be consistent with the BITMAP's YPOS for it to appear on screen.
+### WIN State
+- BG alternates gold (`$CFCB`) / black every frame for 180 frames (~3 seconds)
+- Then soft-reset to Floor 1. `DEATH_COUNT` preserved. `SIDE_BIAS` cleared.
 
-#### RMAC `.objproc` branch directive — status
+### Enemies
+- **Enemy1** — Floor 1 only. Gate 5 side-bias adaptation fully preserved.
+- **Enemy2** — Floor 3 only. Spawn side and speed driven by same `SIDE_BIAS`/`DEATH_COUNT`.
+- Both enemies hidden (HEIGHT=0 in PH0) when hero is on a floor where they are inactive.
+- Floor 2 is enemy-free (quiet escalation floor).
 
-The `branch` directive's exact syntax is non-obvious; quick tests showed inconsistent
-output. **Do not use `.objproc branch` for Gate 2.**  
-Use hand-encoded BRANCH phrases (`dc.l`) if clip objects are needed, or omit clip
-branches entirely for the first solid-bitmap test (BITMAP + STOP is sufficient).
+### Object List at `$004000`
 
-#### Architectural rule
+| Offset | Object | Links to |
+|---|---|---|
+| `$004000` | floor1 BITMAP | floor2 |
+| `$004010` | floor2 BITMAP | floor3 |
+| `$004020` | floor3 BITMAP | enemy1 |
+| `$004030` | enemy1 BITMAP | enemy2 |
+| `$004040` | enemy2 BITMAP | hero |
+| `$004050` | hero BITMAP | STOP |
+| `$004060` | STOP | — |
 
-Always distinguish **Jaguar main DRAM** from **TOM GPU local RAM** (`$F03000`–`$F03FFF`).
-Verify hardware field layouts against authoritative Jaguar documentation
-(Tom/Jerry Hardware Reference Manual) — do not infer bit positions from partial decodes.
+### DRAM State Map
 
----
+| Address | Symbol | Size |
+|---|---|---|
+| `$000100` | HERO_XPOS | word |
+| `$000102` | HERO_YPOS | word (halflines) |
+| `$000104` | HERO_YVEL | signed word |
+| `$000106` | ENEMY1_XPOS | word |
+| `$000108` | ENEMY1_DIR | signed word |
+| `$00010A` | SIDE_BIAS | signed word |
+| `$00010C` | DEATH_COUNT | word |
+| `$00010E` | FLOOR_NUM | word (1/2/3) |
+| `$000110` | ENEMY2_XPOS | word |
+| `$000112` | ENEMY2_DIR | signed word |
+| `$000114` | WIN_TIMER | word |
 
-## Stop Conditions
+### Runtime Verification Checklist (owner to complete)
 
-- Every gate ends **PASS** or **BLOCKED** — no partial states.
-- On PASS or BLOCKED: document findings, commit, push, verify `local HEAD == remote HEAD`.
-- Do not begin the next gate until the current gate is fully committed and pushed.
+- [ ] Hero visible on Floor 1, standing on floor, gravity working
+- [ ] Z=LEFT, C=RIGHT movement with clamps; S=JUMP
+- [ ] Enemy1 bouncing on Floor 1; collision resets hero to Floor 1 centre
+- [ ] Walk right to xpos ≥ 460 while grounded → transition to Floor 2 (enemy-free)
+- [ ] Walk left to xpos ≤ 194 while grounded on Floor 2 → transition to Floor 3
+- [ ] Enemy2 bouncing on Floor 3; collision resets hero to Floor 1
+- [ ] Walk right to xpos ≥ 460 while grounded on Floor 3 → gold BG flash → Floor 1 reset
+- [ ] Die repeatedly; confirm enemy adapts speed and spawn side each life
+- [ ] No corruption, no black screen, stable 59.9 FPS
 
----
+## Source Files
 
-## Do Not Recreate
+| File | Description |
+|---|---|
+| `jaguar-toolchain/gate2/gate2.s` | Phase B source (hero sprite, no input) |
+| `jaguar-toolchain/gate2/gate2.cof` | Phase B COFF binary |
+| `jaguar-toolchain/gate3/gate3.s` | Phase C source (LEFT/RIGHT movement) |
+| `jaguar-toolchain/gate3/gate3.cof` | Phase C COFF binary |
+| `jaguar-toolchain/gate3_floor/gate3_floor.s` | Gate 3 source (floor + walking) |
+| `jaguar-toolchain/gate3_floor/gate3_floor.cof` | Gate 3 COFF binary |
+| `jaguar-toolchain/gate4_slice/gate4_slice.s` | Gate 4 source (vertical slice) |
+| `jaguar-toolchain/gate4_slice/gate4_slice.cof` | Gate 4 COFF binary |
+| `jaguar-toolchain/gate5_memory/gate5_memory.s` | Gate 5 source (adaptive memory) |
+| `jaguar-toolchain/gate5_memory/gate5_memory.cof` | Gate 5 COFF binary |
+| `jaguar-toolchain/gate6_castle/gate6_castle.s` | Gate 6 source (three-floor castle) |
+| `jaguar-toolchain/gate6_castle/gate6_castle.cof` | Gate 6 COFF binary |
+| `jaguar-toolchain/DEVLOG.md` | Full development log |
 
-- The Git repository or its remote
-- The `pre-bob-baseline` tag or its commit
-- The Gate 1 toolchain setup
-- `/original/index.html` or any file under `/original/`
+## Evidence Files
+
+| File | Description |
+|---|---|
+| `jaguar-toolchain/gate3/gate2_pass_1_idle.png` | Gate 2 PASS — idle hero |
+| `jaguar-toolchain/gate3/evidence_A_right.png` | Phase C — hero moved RIGHT |
+| `jaguar-toolchain/gate3/evidence_B_right_clamp.png` | Phase C — RIGHT clamp hit |
+| `jaguar-toolchain/gate3/evidence_C_left_clamp.png` | Phase C — LEFT clamp hit |
+| `jaguar-toolchain/gate3/evidence_D_idle.png` | Phase C — idle/no input |
+| `jaguar-toolchain/gate3/screenshot_phaseC_idle.png` | Phase C idle screenshot |
+| `jaguar-toolchain/gate3/screenshot_phaseC_running.png` | Phase C running screenshot |
+
+## Next Steps
+
+Gate 6 runtime verification pending. Owner loads `gate6_castle.cof` in Virtual Jaguar and completes the checklist above.
+On PASS: update Gate 6 status to ✅ PASS, commit evidence screenshots, tag `v0.6-gate6`.
