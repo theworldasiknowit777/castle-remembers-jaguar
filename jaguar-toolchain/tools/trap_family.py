@@ -1,14 +1,23 @@
-# trap_family.py — Castle Remembers trap sprite sheets (kimi/visual-refinement)
+# trap_family.py — Castle Remembers trap sprites, V2 runtime-compatible
+# (kimi/visual-refinement)
 #
-# Design assets only — 16x16 CRY16 maps for the official trap roster per
-# docs/visual/reference/ref_castle_a.png:
-#   Spikes, Falling Block, Flame Hazard, Swinging Blade.
-# Architecture-native: each trap reads as part of the castle masonry/ironwork.
-# Not linked into the game; Bob allocates buffers, Claude wires behavior (V4).
-# CRY16 decode: same documented APPROXIMATION as cry_preview.py.
+# V2 = palette repair pass: all words VJ-verified via kpalette.py.
+# $F001 (black) and $CE7B (olive) are gone; warning red is $E26E/$E2DD.
+#
+# Runtime drop-ins (same-size replacements for Gate 7 slots, Bob Checkpoint A):
+#   img_spike16  16x8   raised; rows 6-7 alone = retracted slot plate
+#   img_spike24  24x8   same, 6 teeth
+#   img_flame    64x16  eruption, 4 jets; rows 14-15 alone = ember warning
+# Design assets (new OP slots later, Bob Checkpoint B):
+#   falling_block 16x16, swinging_blade 16x16 (polished), flame_hazard 16x16
+#
+# Fragments are dc.w word lists matching castle_art.inc format.
+# Not linked into the game — Claude integrates, Bob confirms checkpoints.
 
 import os
 from PIL import Image, ImageDraw
+
+from kpalette import PAL, cry_to_rgb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IMG_OUT = os.path.join(HERE, "..", "..", "docs", "visual", "previews")
@@ -16,158 +25,240 @@ SPR_OUT = os.path.join(HERE, "..", "..", "docs", "visual", "sprites")
 os.makedirs(IMG_OUT, exist_ok=True)
 os.makedirs(SPR_OUT, exist_ok=True)
 
-TRANS = 0x0000
-OUTL = 0x3601   # near-black outline / crack
-BONE_M = 0xCE7B # stone mid (proven)
-BONE_L = 0xCE9C # stone light / edge glint
-GOLD = 0xCFCB   # proven gold (flame mid)
-DKRED = 0xF001  # proven deep red (warning groove, flame edge)
-IRON = 0x4E1C   # proven dark iron grey
-MORTAR = 0x3943 # proven mortar grey
-GREY_M = 0x4E3C # mid grey — VERIFY-ON-SCREEN (fallback $3943)
-PLUME = 0xD645  # proven warm brown (flame wisp)
-HOT = 0xF0A4    # proven bright warm (hero chest) — flame core
-
-def cry(v):
-    if v == 0x0000:
-        return None
-    y = v & 0xFF
-    if (v >> 15) == 0:
-        return (y, y, y)
-    r = (v >> 11) & 0xF
-    return (max(0, min(255, int(y + (r - 7.5) * 16))), y, y)
-
 CH = {
-    ".": TRANS, "O": OUTL, "b": BONE_M, "B": BONE_L, "G": GOLD,
-    "R": DKRED, "i": IRON, "m": MORTAR, "M": GREY_M, "p": PLUME, "Y": HOT,
+    ".": PAL["TRANS"] if "TRANS" in PAL else 0x0000,
+    "O": PAL["BLACK"],
+    "k": PAL["SHADOW"],
+    "m": PAL["MORTAR"],
+    "w": PAL["WARM_M"],
+    "W": PAL["WARM_L"],
+    "i": PAL["IRON_D"],
+    "I": PAL["IRON_L"],
+    "R": PAL["WARN_D"],
+    "Y": PAL["FLAME_Y"],
+    "F": PAL["FLAME_O"],
+    "e": PAL["EMBER"],
+    "B": PAL["BONE"],
+}
+CH["."] = 0x0000
+
+# ---------------------------------------------------------------- spikes (8-row runtime slots)
+# Teeth = pale stone (WARM_L tip / WARM_M body) on a mortar slot plate.
+# Rows 6-7 must read as "flush dark slots" when drawn alone (retracted state).
+
+def spike_rows(width, teeth):
+    rows = []
+    tooth = [width // teeth * t + 1 for t in range(teeth)]  # left edge of each tooth
+    body = [[x, x + 1, x + 2] for x in tooth]
+    for r in range(8):
+        line = ["."] * width
+        if r <= 1:
+            for b in body:
+                line[b[0] + 1] = "W"
+        elif r <= 3:
+            for b in body:
+                line[b[0]] = "W"; line[b[0] + 1] = "W"; line[b[0] + 2] = "w"
+        elif r <= 5:
+            for b in body:
+                line[b[0]] = "w"; line[b[0] + 1] = "w"; line[b[0] + 2] = "w"
+        elif r == 6:
+            line = ["m"] * width
+        else:
+            line = ["m"] * width
+            for b in body:
+                line[b[0]] = "k"; line[b[0] + 1] = "k"
+        rows.append("".join(line))
+    return rows
+
+IMG_SPIKE16 = spike_rows(16, 4)
+IMG_SPIKE24 = spike_rows(24, 6)
+
+# ---------------------------------------------------------------- flame (64x16 runtime slot)
+# Four jets across, varying heights; rows 14-15 = ember bed (warning state).
+
+JET_H = [13, 11, 14, 12]          # jet height per 16-px tile (max row 13)
+PROFILE = {0: "YY", 1: "YY"}      # rel row -> core pattern (widened below)
+
+def flame_rows():
+    rows = [["."] * 64 for _ in range(16)]
+    for t, h in enumerate(JET_H):
+        cx = t * 16 + 8
+        top = 14 - h
+        for r in range(top, 14):
+            rel = r - top
+            if rel <= 1:
+                span, pat = 2, ("Y", "Y")
+            elif rel <= 4:
+                span, pat = 5, ("F", "Y", "Y", "Y", "F")
+            elif rel <= 8:
+                span, pat = 7, ("F", "F", "Y", "Y", "Y", "F", "F")
+            else:
+                span, pat = 9, ("F", "F", "Y", "Y", "Y", "Y", "Y", "F", "F")
+            x0 = cx - span // 2
+            for i, c in enumerate(pat):
+                rows[r][x0 + i] = c
+        # flicker: a couple of ember sparks above the tip
+        rows[max(0, top - 1)][cx + (1 if t % 2 else -1)] = "e"
+    # ember bed (warning state when drawn alone)
+    ember_x = [2, 7, 12, 19, 24, 30, 35, 41, 46, 52, 57, 62]
+    for x in ember_x:
+        rows[14][x] = "e"
+    for x in (x + 3 for x in ember_x[::2]):
+        if x < 64:
+            rows[15][x] = "e"
+    for x in (0, 15, 16, 31, 32, 47, 48, 63):
+        rows[15][x] = "k"   # scorched ground line
+    return ["".join(r) for r in rows]
+
+IMG_FLAME = flame_rows()
+
+# ---------------------------------------------------------------- design assets (16x16, Checkpoint B)
+
+FALLING_BLOCK = [
+    "......OOOO......",
+    "......OiiO......",
+    "OOOOOOOOOOOOOOOO",
+    "OwwwwwwwwwwwwwwO",
+    "OwWWwwwWwwwWWwwO",
+    "OwwwwwwOwwwwwwwO",
+    "OwwwwwwwOwwwwwwO",
+    "OwwwwwwOwwwwwwwO",
+    "OwwwwwOOOwwwwwwO",
+    "OwwwwwwOwwwwwwwO",
+    "OwwwwwwWwwwwwwwO",
+    "OwwwwwwwwwwwwwwO",
+    "ORRRRRRRRRRRRRRO",
+    "OOOOOOOOOOOOOOOO",
+    "................",
+    "................",
+]
+
+SWINGING_BLADE = [
+    ".......OO.......",
+    ".......iO.......",
+    ".......Oi.......",
+    ".......iO.......",
+    ".......Oi.......",
+    "......OOO.......",
+    ".....OIIiO......",
+    "....OIIIiiO.....",
+    "...OBIIiiiO.....",
+    "..OBIIiiiO......",
+    "..OBIIiiO.......",
+    "..OBIiiO........",
+    "..OBiO..........",
+    "..OBO...........",
+    "...O............",
+    "................",
+]
+
+FLAME_HAZARD = [
+    ".......e........",
+    "......eFe.......",
+    "......FYF.......",
+    ".....eFYFe......",
+    ".....FYFYF......",
+    ".....FYFYF......",
+    "....eFYFYFe.....",
+    "....FYYYYF......",
+    "....FYFFYF......",
+    "...eFYYYYFe.....",
+    "...FYYFFYYF.....",
+    "...FYYYYYYF.....",
+    "..OFFYYYYYYFFO..",
+    "..OiiiiiiiiiO...",
+    "...OiiiiiiO.....",
+    "....OOOOOO......",
+]
+
+RUNTIME = {
+    "img_spike16": IMG_SPIKE16,
+    "img_spike24": IMG_SPIKE24,
+    "img_flame": IMG_FLAME,
+}
+ASSETS = {
+    "falling_block": FALLING_BLOCK,
+    "swinging_blade": SWINGING_BLADE,
+    "flame_hazard": FLAME_HAZARD,
 }
 
-SPRITES = {
-    # ---- Spikes: stone teeth on mortar bed (retracted = bed only) --------
-    "spikes": [
-        "................",
-        "................",
-        "................",
-        "................",
-        "................",
-        ".B...B...B...B..",
-        ".BB..BB..BB..BB.",
-        ".bb..bb..bb..bb.",
-        ".bb..bb..bb..bb.",
-        ".bbb.bbb.bbb.bbb",
-        ".bbb.bbb.bbb.bbb",
-        ".bbb.bbb.bbb.bbb",
-        "OOOOOOOOOOOOOOOO",
-        "mmmmmmmmmmmmmmmm",
-        "OOOOOOOOOOOOOOOO",
-        "................",
-    ],
-    # ---- Falling Block: cracked masonry slab, red warning groove ---------
-    "falling_block": [
-        "......OOOO......",
-        "......OiiO......",
-        "OOOOOOOOOOOOOOOO",
-        "ObbbbbbbbbbbbbbO",
-        "ObBBbbbBbbbBBbbO",
-        "ObbbbbbObbbbbbbO",
-        "ObbbbbbbObbbbbbO",
-        "ObbbbbbObbbbbbbO",
-        "ObbbbbOOObbbbbbO",
-        "ObbbbbbbObbbbbbO",
-        "ObbbbbbBbbbbbbbO",
-        "ObbbbbbbbbbbbbbO",
-        "ORRRRRRRRRRRRRRO",
-        "OOOOOOOOOOOOOOOO",
-        "................",
-        "................",
-    ],
-    # ---- Flame Hazard: iron sconce + rising jet (core/mid/edge/wisp) -----
-    "flame_hazard": [
-        ".......p........",
-        "......pRp.......",
-        "......RYR.......",
-        ".....pRYRp......",
-        ".....RYGYR......",
-        ".....RYGYR......",
-        "....pRYGYRp.....",
-        "....RYYYYR......",
-        "....RYGGYR......",
-        "...pRYYYYRp.....",
-        "...RYYGGYYR.....",
-        "...RYYYYYYR.....",
-        "..ORRYYYYYYRRO..",
-        "..OiiiiiiiiiO...",
-        "...OiiiiiiO.....",
-        "....OOOOOO......",
-    ],
-    # ---- Swinging Blade: chain links + crescent blade, edge glint --------
-    "swinging_blade": [
-        ".......O........",
-        ".......i........",
-        ".......O........",
-        ".......i........",
-        ".......O........",
-        "......OOO.......",
-        ".....OiBiO......",
-        "....OiiiiiO.....",
-        "...OiiiiiiiO....",
-        "..OiiiiiO.......",
-        "..OiiiO.........",
-        "..OiBO..........",
-        "..OBO...........",
-        "...O............",
-        "................",
-        "................",
-    ],
-}
-
-for name, rows in SPRITES.items():
-    assert len(rows) == 16, f"{name}: need 16 rows"
+# ---------------------------------------------------------------- validation
+for name, rows in {**RUNTIME, **ASSETS}.items():
+    w = len(rows[0])
     for r in rows:
-        assert len(r) == 16, f"{name}: row not 16px: '{r}' ({len(r)})"
+        assert len(r) == w, f"{name}: ragged row '{r}'"
         for c in r:
             assert c in CH, f"{name}: bad char '{c}'"
+assert len(IMG_SPIKE16) == 8 and len(IMG_SPIKE16[0]) == 16
+assert len(IMG_SPIKE24) == 8 and len(IMG_SPIKE24[0]) == 24
+assert len(IMG_FLAME) == 16 and len(IMG_FLAME[0]) == 64
+for rows in ASSETS.values():
+    assert len(rows) == 16 and len(rows[0]) == 16
 
-for name, rows in SPRITES.items():
-    print(f"\n== {name} ==")
-    for r in rows:
-        print("  " + r)
-
+# ---------------------------------------------------------------- preview sheet
+SCALE = 6
+LABEL_H = 22
 BG = (14, 14, 20)
-SCALE = 12
-CELL = 16 * SCALE
-LABEL_H = 26
-sheet = Image.new("RGB", (len(SPRITES) * (CELL + 16) + 16, CELL + LABEL_H + 16), BG)
-d = ImageDraw.Draw(sheet)
-for i, (name, rows) in enumerate(SPRITES.items()):
-    x0 = 16 + i * (CELL + 16)
-    d.text((x0, 4), name.replace("_", " ").upper(), fill=(220, 210, 180))
+
+def blit(d, rows, x0, y0, scale):
     for y, row in enumerate(rows):
         for x, c in enumerate(row):
-            col = cry(CH[c])
-            if col is None:
+            if c == ".":
                 continue
-            d.rectangle([x0 + x * SCALE, LABEL_H + y * SCALE,
-                         x0 + (x + 1) * SCALE - 1, LABEL_H + (y + 1) * SCALE - 1],
+            col = cry_to_rgb(CH[c])
+            d.rectangle([x0 + x * scale, y0 + y * scale,
+                         x0 + (x + 1) * scale - 1, y0 + (y + 1) * scale - 1],
                         fill=col)
-sheet.save(os.path.join(IMG_OUT, "v1_trap_family.png"))
 
-def pack(rows):
-    vals = [CH[c] for row in rows for c in row]
-    return [(vals[i] << 16) | vals[i + 1] for i in range(0, len(vals), 2)]
+items = [
+    ("img_spike16 (16x8)", IMG_SPIKE16, 8),
+    ("retracted = rows 6-7", IMG_SPIKE16[6:], 8),
+    ("img_spike24 (24x8)", IMG_SPIKE24, 8),
+    ("img_flame (64x16)", IMG_FLAME, 4),
+    ("warning = rows 14-15", IMG_FLAME[14:], 8),
+    ("falling_block (16x16)", FALLING_BLOCK, 6),
+    ("swinging_blade (16x16)", SWINGING_BLADE, 6),
+    ("flame_hazard (16x16)", FLAME_HAZARD, 6),
+]
+W = 1000
+H = 320
+sheet = Image.new("RGB", (W, H), BG)
+d = ImageDraw.Draw(sheet)
+x, y = 12, LABEL_H
+row_h = 0
+for label, rows, sc in items:
+    wpx = len(rows[0]) * sc
+    hpx = len(rows) * sc
+    if x + wpx > W - 12:
+        x = 12
+        y += row_h + LABEL_H + 10
+        row_h = 0
+    d.text((x, y - 14), label, fill=(220, 210, 180))
+    blit(d, rows, x, y, sc)
+    x += wpx + 24
+    row_h = max(row_h, hpx)
+sheet.save(os.path.join(IMG_OUT, "v2_trap_family.png"))
 
-for name, rows in SPRITES.items():
-    lws = pack(rows)
+# ---------------------------------------------------------------- fragments
+def write_frag(name, rows, checkpoint):
+    w, h = len(rows[0]), len(rows)
     lines = [
-        f"; {name} — 16x16 CRY16 trap (kimi/visual-refinement design asset)",
-        f"; NOT linked into the game — Bob allocates buffer, Claude wires behavior",
-        f"{name}_pixels:",
+        f"; {name} — {w}x{h} CRY16 trap art (kimi/visual-refinement)",
+        f"; Palette VJ-verified (kpalette.py). {checkpoint}",
+        f"; NOT linked — Claude integrates, Bob confirms checkpoint.",
+        f"{name}:",
     ]
-    for r in range(16):
-        chunk = ",".join(f"${v:08X}" for v in lws[r * 8:(r + 1) * 8])
-        lines.append(f"        dc.l    {chunk}  ; row {r:02d}")
+    vals = [CH[c] for row in rows for c in row]
+    for i in range(0, len(vals), 8):
+        lines.append("        dc.w    " + ",".join(f"${v:04X}" for v in vals[i:i + 8]))
     with open(os.path.join(SPR_OUT, f"{name}.s"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
 
-print("\nsheet:", os.path.join(IMG_OUT, "v1_trap_family.png"))
-print("fragments:", os.path.abspath(SPR_OUT))
+for name, rows in RUNTIME.items():
+    write_frag(name, rows, "Same-size slot replacement — Bob Checkpoint A.")
+for name, rows in ASSETS.items():
+    write_frag(name, rows, "New OP slot required — Bob Checkpoint B.")
+
+print("sheet:", os.path.join(IMG_OUT, "v2_trap_family.png"))
+print("runtime fragments:", list(RUNTIME))
+print("design assets:", list(ASSETS))
