@@ -7,12 +7,17 @@
 
 ## 0. Canon preservation — expand, never replace
 
-Canonical references: <https://topilcreations.itch.io/castleremembers> and `original/index.html`.
+Canonical references: <https://topilcreations.itch.io/castleremembers>, `original/index.html`,
+and the official target-look sheets in `docs/visual/reference/` (§10).
 
 **Preserve (non-negotiable):**
 
 - **Name & voice.** THE CASTLE REMEMBERS. The whisper speaker ("…it has watched you N times")
   and the win release — "THE CASTLE FORGETS …for now." — are canon text.
+- **Canon taglines (from the official sheets):** "THE PAST WATCHES. THE CASTLE LEARNS." ·
+  "CAN YOU ESCAPE?" · "THE SAME MAN. A DEADLIER CASTLE." · "A GAME THAT REMEMBERS YOU." ·
+  "SOME CASTLES HAVE WALLS. THIS ONE HAS MEMORY." · "CLIMB. EXPLORE. ADAPT. SURVIVE. ESCAPE."
+- **Canon loop:** EXPLORE → INTERACT → SURVIVE → ASCEND → ESCAPE → ADAPT → REMEMBER → DIE.
 - **Structure.** Five floors: F1/F3 choice floors (two doors hiding ladders), F2/F4 lever
   floors (gate blocks the centre ladder, two levers), F5 exit door onto the battlements.
   Reach the top floor to escape. Every run reshapes the castle.
@@ -20,17 +25,21 @@ Canonical references: <https://topilcreations.itch.io/castleremembers> and `orig
   and levers, archers), chests and shards; death rebuilds a hardened castle.
 - **Adaptation categories (canon):** favored door side, trusted lever, rushing, waiting,
   slipping past, trap-springing, chest-opening.
-- **Hero identity.** The released hero's reads — skin, red cloak, brown tunic, steel — are
-  preserved in the Jaguar CRY16 hero, which stays unchanged.
-- **Art direction.** The original renderer describes itself as "Visigothic pixel look, all
-  procedural"; its palette relationships (cool slab stone, red cloak/banners, gold judgment
-  accents, sunset battlements) are canon.
+- **Hero identity.** The Visigothic warrior: nasal helmet with gold cross inlay, chainmail,
+  fur cloak, round shield with gold rampant-beast emblem, sword. The Jaguar CRY16 hero sprite
+  stays unchanged; the poster's 8-frame animation strip (IDLE/WALK/RUN/JUMP/CLIMB/ATTACK/
+  HURT/DEATH) is a **future owner-approved expansion only** (see §7, V7).
+- **Heraldry.** Gold rampant beast on deep red — the recurring banner/shield emblem.
+- **Art direction.** "Visigothic pixel look, all procedural"; palette relationships: cool
+  slab stone warmed by torchlight, red cloak/banners, gold judgment accents, sunset
+  battlements. The poster's own "COLOR PALETTE (CRY16)" swatches (greys, deep red, browns,
+  tan, gold, cream) confirm the warm-axis anchor strategy of §2.
 
-**Expand for Jaguar (never replace):** deeper ashlar and horseshoe-arch architecture, an enemy
-family that gives the canon guards castle-native faces, traps rendered as architecture, the
+**Expand for Jaguar (never replace):** deeper ashlar and horseshoe-arch architecture, the
+official enemy family given castle-native sprites, traps rendered as architecture, the
 gold-vein path on F5, distinct per-floor color identities. The canon sunset sky
-(`#f2a65a`/`#c8474a` — warm-axis hues, feasible in CRY16) targets the F5 battlement backdrop
-in milestone V2.
+(`#f2a65a`/`#c8474a` — warm-axis hues, feasible in CRY16) targets the F5 battlement
+backdrop in milestone V2.
 
 ---
 
@@ -59,37 +68,50 @@ the warm grey my offline preview tool approximates. Every chroma-shifted value b
 Anchor groups: **N** `$CE..` stone · **G** `$CF..` gold/cream · **W** `$D6/$DA..` warm mids ·
 **R** `$F0..` deep red · **K** greys (`$36../$39../$4E..`, chroma off).
 
+The official hero sheet's "COLOR PALETTE (CRY16)" row (three greys, deep red, two browns,
+tan, gold, cream) validates these groups — the shipped look lives entirely on the CRY warm
+axis plus greys.
+
 ## 3. Five-floor identities (floor bitmap level)
+
+Color script follows the official five-floor sheet (`ref_castle_a.png`): the castle's stone is
+one material; **light and dressing carry the per-floor identity** (torch warmth, banners,
+eery glow, shadow depth, gold ceremony).
 
 | Floor | Base | Highlight | Mortar | Wear/accent | Signature dressing |
 |---|---|---|---|---|---|
-| 1 Gatehouse | `$CE7B` + `$D27B` warm tiles | `$CE9C` | `$3943` | `$CE52` pits, `$4238` groove, `$F001` stud | Worn polished path at spawn; running-bond ashlar ✅ **implemented in V0** |
-| 2 Gallery | `$C66B` cool (fallback `$4E6B`) | `$C684` restrained | `$2C33` damp | `$3601` cracks, `$3A4B` damp blotches | Two structural cracks; lever/gate ironwork `$4E1C`; no warm accents |
-| 3 Awareness | `$CE6F` neutral-dark | `$CE88` | `$3943` | Watcher-gold `$CF8B` eye-motifs, sparse | Deliberate asymmetric damage; favored-side dressing slots for adaptation |
-| 4 Pressure | `$CE4A` dark | `$CE6B` minimal | `$2A2B` near-black | `$F001` warning grooves, iron `$4E1C` | Harsh regular grid; trap-ready floor mouths; red inlay warnings near levers |
-| 5 Judgment | `$D28B` pale (fallback `$CE8B`) | `$D6C8` cream | `$4433` fine | Gold vein `$CF6B→$CF9A→$CFCB` brightening toward exit | Ceremonial order; exit flanked by `$F001` studs; vein rhymes with WIN flash |
+| 1 Gatehouse | `$CE7B` + `$D27B` warm tiles | `$CE9C` | `$3943` | `$CE52` pits, `$4238` groove, `$F001` stud | Worn polished path at spawn; running-bond ashlar ✅ **implemented in V0**; red rampant-beast banners + torch warmth arrive with V2 bands |
+| 2 Gallery | `$C66B` cool (fallback `$4E6B`) | `$C684` restrained | `$2C33` damp | `$3601` cracks, `$3A4B` damp blotches | Amber torch gallery: columns + chandelier (V2); lever/gate ironwork `$4E1C`; two structural cracks |
+| 3 Awareness | `$CE6F` neutral-dark | `$CE88` | `$3943` | Watcher-gold `$CF8B` eye-motifs, sparse | Eerie green cast — CRY's sage decode of low-R values may carry this; **VERIFY-ON-SCREEN**; deliberate asymmetric damage; favored-side dressing slots |
+| 4 Pressure | `$CE4A` dark | `$CE6B` minimal | `$2A2B` near-black | `$F001` warning grooves, iron `$4E1C` | Poster reads violet-dark; saturated violet is **not CRY-feasible** — approximate with dark grey + deep-red accents (**VERIFY**); harsh grid; trap mouths; red inlay warnings near levers |
+| 5 Judgment | `$D28B` pale (fallback `$CE8B`) | `$D6C8` cream | `$4433` fine | Gold vein `$CF6B→$CF9A→$CFCB` brightening toward exit | Ceremonial order; great horseshoe-arch doorway; exit flanked by `$F001` studs; vein rhymes with WIN flash |
 
 All floors keep the proven 8-row silhouette: highlight cap / course A / mortar / course B /
 mortar / shadow base. 16 px tile grid; ≥`$18` intensity steps; `$0000` never used in floor data.
 
-## 4. Enemy family (16×16 CRY16 each)
+## 4. Enemy family — official roster (per `ref_castle_a.png`)
 
 | Enemy | Floor | Silhouette | Palette | Status |
 |---|---|---|---|---|
 | Sentinel Skull | 1 | Round cranium, gold-lit eyes | `$3601` outline, `$CE7B/$CE9C` bone, `$CFCB` eyes, `$F001` sockets | ✅ **V0 implemented** |
-| Fallen Guard | 2–3 | Angular toppled helm + spear stub | `$4E1C` iron, `$D645` plume remnant, dim `$CF8B` slit | Designed, needs buffer (Bob) |
-| Stone Watcher | 3–4 | Square turret head, single gold eye | `$CE7B/$3943` stone, `$CFCB` eye | Designed, needs buffer (Bob) |
-| Judgment Wraith | 5 | Tall narrow hood, inner glow | `$3601` body, `$CFCB` core, `$F001` trim | Designed, needs buffer (Bob) |
+| Fallen Guard | 2–3 | Armored knight, red shield, broken stance | `$4E1C` iron, `$F001` shield red, `$D645` plume remnant | Designed, needs buffer (Bob) |
+| Stone Watcher | 3–4 | Square turret head statue, single gold eye | `$CE7B/$3943` stone, `$CFCB` eye | Designed, needs buffer (Bob) |
+| Judgment Wraith | 5 | Tall narrow hooded pursuer, inner glow | `$3601` body, `$CFCB` core, `$F001` trim | Designed, needs buffer (Bob) |
+| Castle Hound | 2/4 patrol | Low four-legged runner — widest, lowest silhouette | `$4E1C` dark body, `$CE52` mid, `$CFCB` eyes | New from official sheet; design next |
 
-Canon guards/archers map onto this family; behaviors remain Claude's code.
+The F3 winged creature on the sheet reads as ambient castle wildlife (bat); treat as V2
+backdrop dressing unless Claude assigns it behavior. Canon guards/archers map onto this
+family; behaviors remain Claude's code.
 
-## 5. Trap visual language (architecture-native)
+## 5. Trap visual language — official roster (per `ref_castle_a.png`)
 
-- **Retracting spikes** — stone-tooth `$CE9C` tips on `$3943` bed; retract = flush dark slots.
-- **Crushing masonry** — ceiling block with `$F001` warning groove.
-- **Flame jet** — sconce-mounted: `$CFCB` core, `$F001` edge, `$D645` mid (CRY-safe flame).
-- **Collapsing floor** — cracked tiles: `$3601` fissures + sag line; matches Floor 2/4 crack language.
-- **Trapped chest / lever** — canon cues: red clasp `$F001`, trap knob warm `$D645`.
+- **Spikes** — stone-tooth `$CE9C` tips on `$3943` bed; retracted = flush dark slots.
+- **Falling Block** — ceiling masonry slab with `$F001` warning groove and cracked seam.
+- **Flame Hazard** — sconce-mounted jet: `$CFCB` core, `$F001` edge, `$D645` mid (CRY-safe flame).
+- **Swinging Blade** — chained crescent: `$4E1C` iron arm, `$CE9C` edge glint, chain links `$3943`.
+
+Traps read as castle architecture, never pasted-on arcade objects. Trapped chest/lever keep
+canon tells: red clasp `$F001`, warm trap knob `$D645`.
 
 ## 6. Making adaptation visible (design slots, not code)
 
@@ -104,11 +126,12 @@ Claude/Bob.
 |---|---|---|
 | **V0** ✅ | In-place floor + enemy pixel redesign (this branch) | None — SAFE VISUAL DATA CHANGE |
 | V1 | Five per-floor floor bitmaps (§3) | Needs Claude five-floor code + **Bob memory map** (new buffers) |
-| V2 | Environment bands: walls, arches, ladders, doors, gates | **Bob OP/bandwidth + phrase values**; object-list addresses untouched |
-| V3 | Enemy family split (§4) | **Bob buffers**; Claude spawn/behavior hooks |
+| V2 | Environment bands: walls, arches, banners, ladders, doors, gates, F5 sunset | **Bob OP/bandwidth + phrase values**; object-list addresses untouched |
+| V3 | Enemy family split (§4, incl. Castle Hound) | **Bob buffers**; Claude spawn/behavior hooks |
 | V4 | Trap visuals (§5) | Claude trap behavior + **Bob buffers** |
 | V5 | Adaptation dressing + Floor 5 judgment/WIN presentation | Claude hooks + Bob integration; BG/flash logic untouched |
 | V6 | Title screen + whisper presentation ("…it has watched you N times", "THE CASTLE FORGETS") | Kimi glyph/banner design; **Claude/Bob** text rendering + state hooks |
+| V7 | Hero animation frames (IDLE/WALK/RUN/JUMP/CLIMB/ATTACK/HURT/DEATH per hero sheet) | **Owner approval required** (hero is protected); then Claude animation code + Bob buffers |
 
 ## 8. Findings preserved for Bob (do not fix in visual lane)
 
@@ -128,3 +151,14 @@ No visual work touches: OLP setup, TOM/JERRY registers, video timing, phrase enc
 controller logic, gravity/collision, `SIDE_BIAS`/`DEATH_COUNT`, death/respawn, object-list
 memory addresses, DRAM allocation. Anything needing those becomes a written handoff to
 Claude/Bob. Hero sprite is preserved unchanged.
+
+## 10. Reference assets (official target-look sheets)
+
+| File | Content |
+|---|---|
+| `docs/visual/reference/ref_castle_a.png` | Five-floor cross-section poster: floor names/copy, enemy roster, trap roster, "A LIVING CASTLE" feature list, canon loop |
+| `docs/visual/reference/ref_castle_b.png` | Hero sheet: Visigothic warrior details, CRY16 palette swatches, 8-frame sprite concept, Floor 1 gatehouse mockup, UI portrait |
+
+These sheets are the visual target. All palette/identity decisions above trace to them; where
+CRY16 cannot reproduce a poster hue (F3 teal, F4 violet), the nearest warm-axis/grey
+approximation is marked VERIFY-ON-SCREEN and Bob adjudicates at integration.
