@@ -5,6 +5,35 @@
 
 ---
 
+## 0. Canon preservation — expand, never replace
+
+Canonical references: <https://topilcreations.itch.io/castleremembers> and `original/index.html`.
+
+**Preserve (non-negotiable):**
+
+- **Name & voice.** THE CASTLE REMEMBERS. The whisper speaker ("…it has watched you N times")
+  and the win release — "THE CASTLE FORGETS …for now." — are canon text.
+- **Structure.** Five floors: F1/F3 choice floors (two doors hiding ladders), F2/F4 lever
+  floors (gate blocks the centre ladder, two levers), F5 exit door onto the battlements.
+  Reach the top floor to escape. Every run reshapes the castle.
+- **Play.** Climb ladders, open doors, act, avoid guards and traps (spikes, trapped chests
+  and levers, archers), chests and shards; death rebuilds a hardened castle.
+- **Adaptation categories (canon):** favored door side, trusted lever, rushing, waiting,
+  slipping past, trap-springing, chest-opening.
+- **Hero identity.** The released hero's reads — skin, red cloak, brown tunic, steel — are
+  preserved in the Jaguar CRY16 hero, which stays unchanged.
+- **Art direction.** The original renderer describes itself as "Visigothic pixel look, all
+  procedural"; its palette relationships (cool slab stone, red cloak/banners, gold judgment
+  accents, sunset battlements) are canon.
+
+**Expand for Jaguar (never replace):** deeper ashlar and horseshoe-arch architecture, an enemy
+family that gives the canon guards castle-native faces, traps rendered as architecture, the
+gold-vein path on F5, distinct per-floor color identities. The canon sunset sky
+(`#f2a65a`/`#c8474a` — warm-axis hues, feasible in CRY16) targets the F5 battlement backdrop
+in milestone V2.
+
+---
+
 ## 1. Canon structure (from the original game)
 
 | Floor | Type | Canon mechanics | Mood target |
@@ -79,6 +108,7 @@ Claude/Bob.
 | V3 | Enemy family split (§4) | **Bob buffers**; Claude spawn/behavior hooks |
 | V4 | Trap visuals (§5) | Claude trap behavior + **Bob buffers** |
 | V5 | Adaptation dressing + Floor 5 judgment/WIN presentation | Claude hooks + Bob integration; BG/flash logic untouched |
+| V6 | Title screen + whisper presentation ("…it has watched you N times", "THE CASTLE FORGETS") | Kimi glyph/banner design; **Claude/Bob** text rendering + state hooks |
 
 ## 8. Findings preserved for Bob (do not fix in visual lane)
 
