@@ -117,6 +117,9 @@ Not linked into the game — Bob allocates buffers at V3.
 Traps read as castle architecture, never pasted-on arcade objects. Trapped chest/lever keep
 canon tells: red clasp `$F001`, warm trap knob `$D645`.
 
+Pixel maps committed (`trap_family.py`, preview `v1_trap_family.png`, fragments in
+`docs/visual/sprites/`). Canon traps map onto this family; behaviors remain Claude's code.
+
 ## 6. Making adaptation visible (design slots, not code)
 
 Visual responses the art will support once Claude wires behavior: defensive dressing density on
