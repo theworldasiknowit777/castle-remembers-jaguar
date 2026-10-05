@@ -50,7 +50,22 @@ Full pipeline: RMAC → RLN → Jaguar COFF/ABS → Virtual Jaguar → visible o
 
 ---
 
-### Gate 2 — IN PROGRESS 🔄
+### Gate 2 — COMPLETE / PASS
+
+Phase A — TOM BITMAP rectangle: PASS
+Phase B — authentic Castle Remembers hero: PASS
+Phase C — Jaguar LEFT/RIGHT controller movement + clamps: PASS
+
+Verified runtime:
+- hero visible in Virtual Jaguar
+- LEFT movement works
+- RIGHT movement works
+- clamps verified
+- XPOS_START = 257
+- XPOS_MIN = 177
+- XPOS_MAX = 486
+
+Gate 3 — NOT STARTED
 
 **Goal:** Authentic Castle Remembers hero rendered through TOM Object Processor,
 controllable LEFT/RIGHT.

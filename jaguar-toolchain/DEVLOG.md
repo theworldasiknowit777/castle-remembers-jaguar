@@ -213,3 +213,112 @@ Start-Process .\emulator\vjaguar\virtualjaguar.exe
 - **BGEN mode:** Setting bit 7 of `VMODE` causes the Object Processor to fill every line buffer with the `BG` register value before rendering — the simplest way to get a coloured screen without a bitmap.
 - **STOP object:** The Object Processor must have a valid object list even when not rendering sprites. A single STOP object (type 4) at DRAM `$0` with `OLP` pointing there satisfies this constraint.
 - **NTSC/PAL detection:** Hardware `CONFIG` register bit 4 is set on NTSC consoles. Separate timing constants are applied for each standard to produce a centred, full-height display.
+
+---
+
+## Phase C — Joystick LEFT/RIGHT Input & Hero Horizontal Movement
+
+### Source: `gate3/gate3.s`
+
+Phase C adds Jaguar controller input on top of the proven Phase B rendering
+path. **No rendering code was modified** — the TOM/Object Processor path,
+the phrase-0 HEIGHT/DATA blanking refresh, the CLUT, and the pixel data are
+all preserved verbatim.
+
+#### Input correction — JOYSTICK register protocol
+
+`JOYSTICK` at `$F14000` is a **16-bit** register. The prior implementation
+incorrectly used 32-bit longword reads and tested bits 22/23 (which span both
+`JOYSTICK` and `JOYBUTS` as a combined longword — wrong). The corrected
+implementation:
+
+1. Writes `$817E` (16-bit word) to `JOYSTICK` to select **Row 0** and enable
+   the joypad data outputs for Port 1.
+2. Reads `JOYSTICK` back as a 16-bit word.
+3. Tests the correct bit positions for the D-pad (active-LOW, 0 = pressed).
+
+#### Jaguar controller matrix — Row 0
+
+`JOY_ROW0 = $817E`
+
+| Bit | Signal | Direction | Active |
+|-----|--------|-----------|--------|
+| 8   | J8 / Up    | Up    | LOW (0 = pressed) |
+| 9   | J9 / Down  | Down  | LOW (0 = pressed) |
+| 10  | J10 / Left | **LEFT**  | LOW (0 = pressed) |
+| 11  | J11 / Right| **RIGHT** | LOW (0 = pressed) |
+
+Row select value `$817E` decoded:
+```
+Bit 15   = 1  (joy data enable — must be set to enable outputs)
+Bits 14:8 = $01 (Row 0 select; keeps audio mute bit clear)
+Bits 7:0  = $7E (output drive enables; keeps audio enabled)
+```
+
+#### What Phase C adds / changes
+
+| Symbol | Value | Purpose |
+|---|---|---|
+| `JOYSTICK` | `$F14000` | Jerry 16-bit joypad register |
+| `JOY_ROW0` | `$817E` | Row 0 select — D-pad on Port 1 |
+| `HERO_XPOS_ADDR` | `$000100` | DRAM word holding current XPOS |
+| `XPOS_START` | `257` | Initial position (NTSC screen centre) |
+| `XPOS_MIN` / `XPOS_MAX` | `177` / `700` | Screen edge clamps |
+| `XPOS_SPEED` | `2` | Pixel-clocks per frame |
+| `PH1_UPPER` | `$4010C000` | Fixed upper bits of PH1_LO |
+
+#### Per-frame loop (blanking window)
+
+```
+forever:
+  1. wait until VC > 507  (end of active picture)
+  2. move.w #$817E,JOYSTICK   (select Row 0, enable outputs)
+  3. move.w JOYSTICK,d0       (read Port 1 D-pad, active-LOW)
+  4. btst #10,d0  → LEFT  (J10)?  sub #2 from xpos, clamp XPOS_MIN
+  5. btst #11,d0  → RIGHT (J11)?  add #2 to xpos,  clamp XPOS_MAX
+  6. PH1_LO = PH1_UPPER | (xpos & $FFF); write to OP_LIST+8/12
+  7. move.l #PH0_HI,OP_LIST+0  (refresh phrase 0 — unchanged Phase B)
+     move.l #PH0_LO,OP_LIST+4
+  8. wait until VC < 507  (new frame started)
+  9. bra forever
+```
+
+#### BITMAP phrase 1 XPOS field
+
+XPOS lives in bits [11:0] of PH1_LO (the low longword of BITMAP phrase 1).
+All other PH1_LO bits (DEPTH=4/16bpp, PITCH=1, DWIDTH=4, IWIDTH=4) are
+preserved in `PH1_UPPER = $4010C000` and OR'd with the new XPOS each frame.
+
+#### Build commands
+
+```powershell
+cd C:\Users\Owner\.bob\playground\jaguar-toolchain
+
+# Assemble
+.\bin\rmac.exe -fb -m68000 -o gate3\gate3.o gate3\gate3.s
+
+# Link → COF (emulator)
+.\bin\rln.exe -a 802000 r r -e -o gate3\gate3.cof gate3\gate3.o
+```
+
+#### Binary metrics
+
+| File | COF size | Text segment | Notes |
+|---|---|---|---|
+| `gate2\gate2.cof` | 1336 B | `$490` = 1168 B | Phase B baseline |
+| `gate3\gate3.cof` | 1440 B | `$4F8` = 1272 B | +104 B controller code |
+
+Zero warnings, zero errors on assemble and link.
+
+#### Gate 2 evidence (Phase B screenshots preserved)
+
+| File | Description |
+|---|---|
+| `gate2/screenshot_gate2.png` | Gate-2 v1 |
+| `gate2/screenshot_gate2_v2.png` | Gate-2 v2 |
+| `gate2/screenshot_gate2_v3.jpg` | Gate-2 v3 |
+| `gate2/screenshot_gate2_v4.jpg` | Gate-2 v4 |
+| `gate2/screenshot_gate2_v5.jpg` | Gate-2 v5 |
+| `gate2/screenshot_phaseB.jpg` | Phase B pass |
+| `gate2/screenshot_phaseB2.jpg` | Phase B pass 2 |
+
