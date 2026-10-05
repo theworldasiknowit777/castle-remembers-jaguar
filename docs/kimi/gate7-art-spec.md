@@ -55,7 +55,7 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 ## Gameplay-readability requirements
 
 1. **Collision boxes are narrower than the sprites.**
-   - Hero: x+4..x+12, feet x+5..x+11. Enemies: x+3..x+13, top 12 rows (skull: top 8 rows) don't hurt.
+   - Hero: x+4..x+12, feet x+5..x+11. Enemies: x+3..x+13, top 6 rows (skull: top 4 rows) don't hurt.
    - Keep each silhouette's solid mass inside those boxes.
 2. **Stunned guards flicker** (drawn every other 4 frames). No extra frame is needed.
 3. **The trapped-lever tell and the heavy guard** are the two "learnable" cues the original relies on. Keep them distinct at 1× scale.
