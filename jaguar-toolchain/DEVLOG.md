@@ -1117,3 +1117,19 @@ Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generat
 - **Exit arch:** reads as the goal.
 - **Ladder:** placeholder, the climb is aligned.
 - **Watcher:** faces left, with left-flying arrows readable.
+
+### Gate 7 V7 ladder recovery: Kimi's 16×244 ladders
+
+- **Source:** the recovered package (`ladder_normal_16x244` and `ladder_gold_16x244`, `.s` + `.png`, plus preview and note), vendored unchanged in `kimi_sprites/`. The art was not regenerated.
+- **Format finding:** the `.s` files are 4bpp indexed with RGB24 palettes (1,952 B each), not the runtime's direct 16bpp CRY16 words (16 × 244 × 2 = 7,808 B).
+- **Conversion:** `mkart.py` decodes the indices (high nibble is the left pixel) and maps each of the 9 used colours to CRY16 with `jagsim.rgb_to_cry`, the same VJ tables as the other Kimi art. Index 0 becomes `$0000`, which is transparent.
+- **Checks:**
+  - 16×244 is enforced, and the build stops on any mismatch.
+  - The `.s` decodes to its PNG with 0 differing pixels (both files).
+  - The converted words round-trip to the PNG with identical shape and transparency, and at most 9 per colour channel of quantisation error.
+- **No code change.** `gate7_castle.s` is untouched, and the COFF is the same size because the placeholder was already 16×244. Nothing changed in ladder geometry, climb path, collision, OP count, LINK or buffers.
+- **VJ (60 FPS):** both variants seen at every draw height, with the hero climbing the gold long ladder F1 → F3.
+  - up-ladder, 200 rows (normal F3 left, gold F1 right)
+  - through-floor, 242 rows (gold on F2, normal on F3)
+  - hole stub, 34 rows (F2 left, F3 centre)
+  - Evidence is in `gate7_castle/v7_evidence/ladder_*`.

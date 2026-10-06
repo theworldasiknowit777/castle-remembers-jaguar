@@ -33,8 +33,18 @@ file stops the build.
 | `img_arrow_l.s` | `img_arrow_l` | arrow, flying left | 8×2 | `195b8e8` |
 | `img_arrow_r.s` | `img_arrow_r` | arrow, flying right | 8×2 | `e397df0` |
 
+**Ladders (V7 ladder recovery)** are Kimi's 4bpp *indexed* export: 16 RGB24 palette entries (`dc.l`) plus 244 rows × 8 bytes (`dc.b`, high nibble = left pixel, index 0 = transparent). `mkart.py` (`kimi_indexed_fragment`) converts them to the runtime's 16bpp CRY16 words with the same VJ CRY tables as every other asset, and refuses the build if the `.s` and its PNG differ by a single pixel.
+
+| File | Slot | What | Size |
+|---|---|---|---|
+| `ladder_normal_16x244.s` + `.png` | `img_ladder` | wood ladder | 16×244 |
+| `ladder_gold_16x244.s` + `.png` | `img_ladder_gold` | gold long ladder | 16×244 |
+| `ladder_correction_preview.png`, `V7_LADDER_CORRECTION_NOTE.md` | | Kimi's preview and note (reference only) | |
+
+The runtime draws the top 200 rows (up-ladder), 242 (up + hole) or 34 (hole stub) of the image.
+
 **Not integrated yet:**
-- `img_ladder.s`: 16×216, but the runtime ladder is 16×244. It draws 200 rows (up-ladder), 242 (up + hole) or 34 (hole stub). A 16×244 asset (and a gold variant) is needed.
+- `img_ladder.s` (16×216): superseded by the recovered 16×244 package above.
 - `castle_hound.s`: not in the V7 enemy contract so far.
 - `flame_hazard.s`: 16×16, but there is no runtime slot.
 - Decals and the 320×180 backdrops: a later wave; backdrops need Bob.

@@ -110,8 +110,8 @@ swinging blade, the Castle Hound, and castle-voice state.
   - **Enemies:** skull, guard, heavy, watcher (both facings), wraith. These are the `b00d520` runtime corrections.
   - **Traps:** spikes 16/24, eruption, falling masonry, swinging blade.
   - **Props:** doors (closed / open / bricked), portcullis, four lever states, exit arch, arrows.
+  - **Ladders:** normal and gold, 16×244 (recovered indexed export, converted to CRY16 by `mkart.py`).
 - **Still placeholder:**
-  - ladder and gold ladder: they need 16×244 (Kimi's is 16×216)
   - Castle Hound
   - chests and shard
   - decals

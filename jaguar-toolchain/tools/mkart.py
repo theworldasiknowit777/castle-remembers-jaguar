@@ -499,8 +499,54 @@ KIMI_VENDORED = {
     "exit": ("img_exit.s", 32, 48),
     "arrow_l": ("img_arrow_l.s", 8, 2),
     "arrow_r": ("img_arrow_r.s", 8, 2),
+    # ladders (V7 ladder recovery): 4bpp INDEXED + RGB24 palette, converted below
+    "ladder": ("ladder_normal_16x244.s", 16, 244),
+    "ladder_gold": ("ladder_gold_16x244.s", 16, 244),
 }
 VENDORED_ONLY = ("watcher_l",)                  # no placeholder: emitted after the rest
+
+
+def kimi_indexed_fragment(path, slot, w, h):
+    """Kimi's 4bpp indexed export (`<name>_pal:` = 16 x RGB24 dc.l, then h rows of
+    w/2 dc.b, high nibble = left pixel, index 0 = transparent) -> the runtime's
+    16bpp CRY16 words, colours chosen with the same VJ CRY tables as every
+    other asset (jagsim.rgb_to_cry). A same-named .png beside it, when PIL is
+    available, must match pixel for pixel."""
+    txt = open(path, encoding="utf-8", errors="replace").read()
+    pal, rows = [], []
+    for ln in txt.splitlines():
+        code = ln.split(";")[0]
+        if re.search(r"dc\.l\s", code):
+            pal += [int(v, 16) for v in re.findall(r"\$([0-9A-Fa-f]{6})(?![0-9A-Fa-f])", code)]
+        elif re.search(r"dc\.b\s", code):
+            rows.append([int(v, 16) for v in re.findall(r"\$([0-9A-Fa-f]{2})(?![0-9A-Fa-f])", code)])
+    if len(pal) != 16 or len(rows) != h or any(len(r) != w // 2 for r in rows):
+        print("  kimi %s skipped: %d palette entries, %d rows of %s bytes (need 16, %d of %d)" % (
+            os.path.basename(path), len(pal), len(rows), sorted(set(len(r) for r in rows)), h, w // 2))
+        return None
+    pix = [[n for b in r for n in (b >> 4, b & 15)] for r in rows]
+    try:
+        from PIL import Image
+        png = os.path.splitext(path)[0] + ".png"
+        if os.path.exists(png):
+            im = Image.open(png).convert("RGBA")
+            if im.size != (w, h):
+                raise SystemExit("mkart: %s is %dx%d, expected %dx%d" % (os.path.basename(png), im.size[0], im.size[1], w, h))
+            for y in range(h):
+                for x in range(w):
+                    r_, g_, b_, a_ = im.getpixel((x, y))
+                    i = pix[y][x]
+                    want = (0, 0, 0, 0) if i == 0 else ((pal[i] >> 16) & 255, (pal[i] >> 8) & 255, pal[i] & 255, 255)
+                    if (a_ == 0) != (i == 0) or (i and (r_, g_, b_, a_) != want):
+                        raise SystemExit("mkart: %s differs from its PNG at (%d,%d)" % (os.path.basename(path), x, y))
+    except ImportError:
+        pass
+    cry = {0: 0}
+    for i in sorted(set(v for r in pix for v in r) - {0}):
+        cry[i] = rgb_to_cry(((pal[i] >> 16) & 255, (pal[i] >> 8) & 255, pal[i] & 255))
+    words = ["%04X" % cry[v] for r in pix for v in r]
+    print("  using kimi %s for img_%s (indexed -> CRY16, %d colours)" % (os.path.basename(path), slot, len(cry) - 1))
+    return ["        dc.w    " + ",".join("$" + x for x in words[i:i + 8]) for i in range(0, len(words), 8)]
 
 
 def kimi_vendored():
@@ -509,7 +555,9 @@ def kimi_vendored():
         if slot in IMAGES and (len(IMAGES[slot][0]), len(IMAGES[slot])) != (w, h):
             raise SystemExit("mkart: runtime slot img_%s is %dx%d, contract says %dx%d"
                              % (slot, len(IMAGES[slot][0]), len(IMAGES[slot]), w, h))
-        got = kimi_fragment(os.path.join(VENDORED, name), slot, w, h)
+        path = os.path.join(VENDORED, name)
+        indexed = "_pal:" in open(path, encoding="utf-8", errors="replace").read()
+        got = (kimi_indexed_fragment if indexed else kimi_fragment)(path, slot, w, h)
         if not got:
             raise SystemExit("mkart: Kimi art %s does not fit img_%s (%dx%d)" % (name, slot, w, h))
         found[slot] = got

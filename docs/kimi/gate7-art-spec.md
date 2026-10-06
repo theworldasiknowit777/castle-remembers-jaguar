@@ -32,7 +32,7 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 | Image | Size (px) | States / notes | Placement |
 |---|---|---|---|
 | `img_floor` | 320×8 | floor slab, opaque (Bob's) | y = floor |
-| `img_ladder` | **16×244** (wave 2; was 16×216) | **Still a placeholder: Kimi's asset is 16×216.** One tall strip. The game shows the top 200 lines (up-ladder), 34 lines (hole below the floor), or 242 lines (a ladder that passes through the floor) | x = 6 / 152 / 298 |
+| `img_ladder` | **16×244** (wave 2; was 16×216) |  **Kimi art integrated (V7 ladder recovery, 16×244).** One tall strip. The game shows the top 200 lines (up-ladder), 34 lines (hole below the floor), or 242 lines (a ladder that passes through the floor) | x = 6 / 152 / 298 |
 | `img_ladder_gold` | 16×244 | **new**: the canon gold long ladder (door tier 2, avoided side, runs F1 to F3) | same x |
 | `img_door_closed` | 8×40 | wall (blocks walking) — **Kimi art integrated (V7 wave 2)** | x = 94 / 218 (tight: 75 / 237) |
 | `img_door_open` | 8×40 | open frame — **Kimi art integrated (V7 wave 2)** | same |
