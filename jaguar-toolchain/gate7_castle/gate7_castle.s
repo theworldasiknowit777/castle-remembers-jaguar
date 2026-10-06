@@ -2888,6 +2888,27 @@ place:
         moveq   #C_GUARD,d7
         bsr     set_enemy
 .qr:     move.w  #1,HUDDIRTY(a5)
+        .if ^^defined SHOWCASE
+        ; ---- V7 art showcase TEST build only (-dSHOWCASE -dSHOW_A=t -dSHOW_B=t):
+        ;      F1's two idle enemy slots show types SHOW_A (left corridor) and
+        ;      SHOW_B (right corridor) so every enemy's art can be seen in VJ
+        lea     FENEMY+(0*64)(a5),a0
+        move.w  #SHOW_A,d0
+        moveq   #40,d1
+        moveq   #1,d2
+        moveq   #24,d3
+        moveq   #70,d4
+        moveq   #0,d5
+        moveq   #C_GUARD,d7
+        bsr     set_enemy
+        lea     32(a0),a0
+        move.w  #SHOW_B,d0
+        move.w  #250,d1
+        moveq   #-1,d2
+        move.w  #232,d3
+        move.w  #276,d4
+        bsr     set_enemy
+        .endif
         rts
 
 ; set_enemy — a0 = plan slot; d0 type, d1 x, d2 dir, d3 min, d4 max,

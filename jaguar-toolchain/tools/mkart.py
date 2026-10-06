@@ -469,6 +469,30 @@ KIMI_SLOTS = {
 }
 SPRITES = os.path.join(os.path.dirname(ROOT), "docs", "visual", "sprites")
 
+# V7 wave 1 (enemies): Kimi's frozen enemy art, vendored verbatim in
+# jaguar-toolchain/kimi_sprites/ so the build never needs her branch. These
+# are required: a missing or wrong-sized file stops the build.
+VENDORED = os.path.join(ROOT, "kimi_sprites")
+KIMI_ENEMIES = {
+    "skull": "sentinel_skull.s",
+    "guard": "img_guard.s",
+    "heavy": "img_heavy.s",
+    "watcher": "img_watcher.s",
+    "wraith": "img_wraith.s",
+}
+ENEMY_SIZE = {"skull": (16, 16), "guard": (16, 24), "heavy": (16, 24), "watcher": (16, 24), "wraith": (16, 24)}
+
+
+def kimi_enemies():
+    found = {}
+    for slot, name in KIMI_ENEMIES.items():
+        w, h = ENEMY_SIZE[slot]
+        got = kimi_fragment(os.path.join(VENDORED, name), slot, w, h)
+        if not got:
+            raise SystemExit("mkart: Kimi enemy art %s does not fit img_%s (%dx%d)" % (name, slot, w, h))
+        found[slot] = got
+    return found
+
 
 def kimi_fragment(path, slot, w, h):
     txt = open(path, encoding="utf-8", errors="replace").read()
@@ -519,12 +543,18 @@ def emit():
     o.append("        .phrase")
     o.append("pix_start:")
     o.append("; ---- Bob's authentic art (verbatim from gate6_castle.s) ----")
+    enemies = kimi_enemies()
     for lbl, name, w, h in (("floor_pixels", "img_floor", 320, 8), ("enemy_pixels", "img_skull", 16, 16),
                             ("hero_pixels", "img_hero", 16, 24)):
+        if name == "img_skull":                     # Kimi's Sentinel Skull replaces Bob's
+            o.append("%s:\t\t\t\t; %dx%d (Kimi sentinel_skull.s)" % (name, w, h))
+            o.extend(enemies["skull"])
+            continue
         o.append("%s:\t\t\t\t; %dx%d" % (name, w, h))
         o.append(bob_block(src, lbl))
     o.append("; ---- placeholder art (Kimi to replace; keep sizes or tell Claude) ----")
     kimi = kimi_art(IMAGES)
+    kimi.update({k: v for k, v in enemies.items() if k in IMAGES})
     for name, rows in IMAGES.items():
         o.append("img_%s:\t\t\t\t; %dx%d%s" % (name, len(rows[0]), len(rows), " (Kimi)" if name in kimi else ""))
         if name in kimi:

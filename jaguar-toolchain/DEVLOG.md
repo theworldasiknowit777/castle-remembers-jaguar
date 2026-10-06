@@ -1028,3 +1028,38 @@ Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generat
   - campaign 14/15 escapes, 0 softlocks
   - soak 20,000 frames, no invariant violations, max 466 of 525 halflines
 - **Real VJ (59.9–60 FPS):** F1/F2 titles, "L - OPEN", shard, death, OBSERVED/RECONSTRUCTING, floor-2 observation, both whispers, door and pace pips after the rebuild, continued play. Shots in `gate7_castle/v6_evidence/`.
+
+### Gate 7 V7 wave 1: Kimi's enemy art
+
+**Integrated in the existing slots** (same image labels, same `enimg` / `enrows`, same object):
+
+| Slot | Kimi file | Size |
+|---|---|---|
+| `img_skull` | `sentinel_skull.s` | 16×16 |
+| `img_guard` | `img_guard.s` | 16×24 |
+| `img_heavy` | `img_heavy.s` | 16×24 |
+| `img_watcher` | `img_watcher.s` | 16×24 |
+| `img_wraith` | `img_wraith.s` | 16×24 |
+
+- Verbatim copies live in `jaguar-toolchain/kimi_sprites/` (blob hashes in its README), so the build never needs her branch.
+- `mkart.py` requires them: a missing or wrong-sized file stops the build.
+- **No gameplay or architecture change.** The `3e1fc36` source assembled with the new `castle_art.inc` gives the same `gate7_castle.cof` byte for byte. AI, speeds, hitboxes, shove, hound, spawns, memory, object indices, `NOBJ` 19, LINK, buffers and init are untouched.
+- **Art region:** +256 B, still below `TEXTBUF` (`$01A000`).
+
+**Showcase test build** (VJ art review only, never shipped):
+- `-dSHOWCASE=1 -dSHOW_A=t -dSHOW_B=t` puts enemy types `t` in F1's two idle enemy slots (corridors). This is how the Heavy Guard and Stone Watcher, which need memory tiers, were seen in VJ.
+- The hook is assembled out of the normal build.
+
+**Runtime / art mismatches found:**
+- **Bob's legacy skull was 8×16 data in a 16×16 slot.** It was 4 longs (8 px) per row, 256 B, but drawn with `OB_W` 4 and `OB_H` 16. So the OP showed pairs of rows side by side and read 256 B past it into the hero art. Kimi's true 16×16 skull fixes this; that's the +256 B.
+- **Kimi's skull uses Bob's Gate 3 colours.** `$CE7B` ("steel-grey") and `$3601` render green and dark green through VJ's CRY tables (as the floor slab does), and `$F001` renders black. It is integrated verbatim, as visual authority. Her other four enemies use her VJ-verified palette.
+- **The spec's Stone Watcher "turns to face the hero",** but the runtime draws enemies unmirrored, so the bow always faces right. Mirroring would need a new object flag or a second image, which is outside this wave.
+- **Sprites have 1–2 blank bottom rows.** Feet sit 1 px above the floor line (2 px for the floating skull and wraith). No clipping.
+
+**VJ (60 FPS)**, evidence in `gate7_castle/v7_evidence/`:
+- **Normal build:**
+  - F2 skull patrolling past the gate, levers and ladder
+  - message band and HUD untouched
+  - death, rebuild, whispers
+  - no corruption afterwards
+- **Showcase builds:** skull + guard, heavy + watcher, wraith + guard; transparency clean; no garbage pixels; on the floor line. A shoved guard reads as the stun flicker next to the open door.

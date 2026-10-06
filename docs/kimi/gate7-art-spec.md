@@ -45,11 +45,11 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 | `img_spike16`, `img_spike24` | 16×8, 24×8 | raised. **Bottom 2 rows are also drawn alone as the retracted state** (keep them a "slot" plate) | various |
 | `img_exit` | 32×48 | exit arch, bright: the goal | x = 277 (or 11 when moved left) |
 | `img_flame` | 64×16 | eruption. **Bottom 2 rows alone flash as the 0.55 s warning** (keep them embers) | ±32 px around a lever |
-| `img_skull` | 16×16 | Sentinel Skull (Bob's) | patrols |
-| `img_guard` | 16×24 | Fallen Guard | patrols / chases |
-| `img_heavy` | 16×24 | Fallen Guard, armoured (needs two shoves): must read as tougher | |
-| `img_watcher` | 16×24 | Stone Watcher, static archer statue that turns to face the hero | |
-| `img_wraith` | 16×24 | Judgment Wraith, F5 pursuer | |
+| `img_skull` | 16×16 | Sentinel Skull — **Kimi `sentinel_skull.s` integrated (V7 wave 1)** | patrols |
+| `img_guard` | 16×24 | Fallen Guard — **Kimi art integrated (V7 wave 1)** | patrols / chases |
+| `img_heavy` | 16×24 | Fallen Guard, armoured (needs two shoves): must read as tougher — **Kimi art integrated (V7 wave 1)** | |
+| `img_watcher` | 16×24 | Stone Watcher, static archer statue — **Kimi art integrated (V7 wave 1)**; the runtime draws enemies unmirrored, so it does not turn | |
+| `img_wraith` | 16×24 | Judgment Wraith, F5 pursuer — **Kimi art integrated (V7 wave 1)** | |
 | `img_arrow_r`, `img_arrow_l` | 8×2 | arrow, both directions (no hardware flip used) | knee height |
 | `img_hero` | 16×24 | Bob's authentic hero (single frame) | |
 | `img_chest_closed` | 16×12 | **new**: real chest | F1 180 · F2 261 · F3 123 · F4 266 |

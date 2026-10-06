@@ -106,6 +106,8 @@ swinging blade, the Castle Hound, and castle-voice state.
 
 ## 5. Kimi's art: integration status
 
+- **V7 wave 1 (enemies), integrated:** Sentinel Skull, Fallen Guard, Heavy Fallen Guard, Stone Watcher, Judgment Wraith. Verbatim copies in `jaguar-toolchain/kimi_sprites/` are imported by `tools/mkart.py` into the existing slots. Nothing else of Kimi's art is integrated yet (the hound, traps, doors, levers, ladders, props and backdrops stay placeholders).
+
 `tools/mkart.py` imports Kimi's fragments automatically on merge. A fragment is used only when it exactly matches the slot size; otherwise the generator prints why.
 
 **Accepted formats:**
