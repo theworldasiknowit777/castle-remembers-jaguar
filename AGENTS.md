@@ -12,7 +12,16 @@
 | Gate 4 — Vertical Slice | ✅ PASS | Jump + enemy + collision/reset — full gameplay loop |
 | Gate 5 — Adaptive Memory | ✅ PASS | Side-bias tracking; enemy adapts spawn + speed on respawn |
 | Gate 6 — Three-Floor Castle | ⏳ BUILT — awaiting runtime verification | Three floors, two enemies, ladder transitions, WIN state |
-| Gate 7 — Five-Floor Castle | ✅ PLAYABLE (branch `claude/gameplay-refinement`) — awaiting Bob low-level audit | Five floors, doors/levers/gates, 5 enemy types, spikes/eruption, full castle memory; 13/13 playtests, VJ-verified |
+| Gate 7 — Five-Floor Castle | ✅ PLAYABLE (branch `claude/gameplay-refinement`) — awaiting Bob low-level audit | Five floors, doors/levers/gates, chests, long ladder, 6 enemy types (incl. Castle Hound), spikes/eruption/masonry/blade, six-category castle memory, castle-voice state; scripted suite + campaign + soak green, VJ-verified |
+
+## Binary safety (read before touching any .cof / .o / .abs)
+
+**Never use PowerShell 5.1 `>` redirection for binary Git output.** Use `git restore`,
+a binary-safe copy, or rebuild with RMAC/RLN. On 2026-10-05 a Gate 7 `.cof` written with
+`>` became UTF-16 text (header `FF FE`); Virtual Jaguar ran garbage and stopped with
+"Illegal instruction at $E00004". `jaguar-toolchain/tools/check_cof.py` now rejects any
+`.cof` that does not start `01 50` with entry `$802000`; the Gate 7 build script, the
+jagsim harness and `vj_drive.ps1` all run it.
 
 ## Gate 2 Summary
 
@@ -156,6 +165,8 @@
   68000 code via `tools/jagsim.py`), `tools/soak_gate7.py`, `tools/vj_drive.ps1` (real VJ, F8 shots).
 - **Controls:** Z/C walk · S jump / climb up · X climb down / ACT · L ACT (open door, pull lever, shove guard).
 - **Design + verification:** `jaguar-toolchain/DEVLOG.md` § Gate 7.
+- **V6 castle voice + HUD row:** Kimi's `MSG_*` ids, priority queue and canon observations, plus the six-category icon/pip HUD and the castle-voice text band, all in the normal build. Bob passed Checkpoint B on `fed2955` (O_TEXT, `NOBJ` 19, `TEXTBUF` `$01A000`): `docs/bob/gate7-v6-checkpoint-b.md`.
+- **V7 wave 1 (enemy art):** Kimi's skull, guard, heavy, watcher and wraith art is in the existing enemy slots (`jaguar-toolchain/kimi_sprites/`, imported by `mkart.py`). Only art data changed: the code is byte-identical to `3e1fc36`.
 - **Low-level changes needing Bob's sign-off:** `docs/bob/gate7-lowlevel-review.md`
   (VC field-bit mask — fixes 30 Hz flicker also present in Gate 6; shadow list; runtime
   phrase builder; XPOS origin 0; new memory map).

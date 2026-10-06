@@ -26,6 +26,15 @@ public static class W {
 "@
 New-Item -ItemType Directory -Force $Out | Out-Null
 $romPath = (Resolve-Path $Rom).Path
+# Guard: a Jaguar COFF starts 01 50 and enters at $802000 (header bytes 36..39).
+$hdr = [System.IO.File]::ReadAllBytes($romPath)
+if ($romPath -like "*.cof") {
+    # (cast first: shifting a [byte] in PowerShell stays 8-bit and overflows to 0)
+    $entry = ([int]$hdr[36] -shl 24) -bor ([int]$hdr[37] -shl 16) -bor ([int]$hdr[38] -shl 8) -bor [int]$hdr[39]
+    if ($hdr.Length -lt 48 -or $hdr[0] -ne 0x01 -or $hdr[1] -ne 0x50 -or $entry -ne 0x802000) {
+        throw ("refusing {0}: not a Jaguar COFF (first bytes {1:X2} {2:X2}, entry `${3:X6}). Restore it with git restore or rebuild; never write binaries with PowerShell '>'." -f $romPath, $hdr[0], $hdr[1], $entry)
+    }
+}
 $p = Start-Process -FilePath $Exe -ArgumentList "`"$romPath`"" -WorkingDirectory (Split-Path $Exe) -PassThru
 $h = [IntPtr]::Zero
 for ($i = 0; $i -lt 50 -and $h -eq [IntPtr]::Zero; $i++) {

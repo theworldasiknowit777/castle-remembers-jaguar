@@ -35,3 +35,6 @@ desktop.ini
 __pycache__/
 *.pyc
 *.prn
+
+# assembler listings
+jaguar-toolchain/gate7_castle/*.prn

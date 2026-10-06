@@ -103,6 +103,10 @@ class JagSim:
 
     # ---------------------------------------------------------------- loading
     def _load_cof(self, path):
+        from check_cof import check
+        problems = check(path)
+        if problems:
+            raise ValueError("refusing %s: %s" % (path, "; ".join(problems)))
         data = open(path, "rb").read()
         magic, nsect = struct.unpack(">HH", data[0:4])
         if magic != 0x0150:
@@ -253,6 +257,18 @@ class JagSim:
                     self._instr_this_blank += self.ipl
             self.frame += 1
         return self
+
+    def snapshot(self):
+        """Whole machine state (for look-ahead bots); restore() rewinds to it."""
+        return (self.uc.context_save(), bytes(self.uc.mem_read(0, DRAM_SIZE)), bytes(self.io),
+                self.pc, self.vc, self.frame, self.joy_select, self._instr_this_blank, len(self.blank_instr))
+
+    def restore(self, snap):
+        ctx, dram, io, self.pc, self.vc, self.frame, self.joy_select, self._instr_this_blank, nb = snap
+        self.uc.context_restore(ctx)
+        self.uc.mem_write(0, dram)
+        self.io[:] = io
+        del self.blank_instr[nb:]
 
     def olp_valid(self):
         return self.io_w(VDE_OFF) != 0

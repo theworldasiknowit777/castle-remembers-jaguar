@@ -96,3 +96,13 @@ powershell -File jaguar-toolchain/tools/vj_drive.ps1 -Rom jaguar-toolchain/gate7
 
 - VJ's own screenshots land in `%LOCALAPPDATA%\virtualjaguar\screenshots`.
 - Screen-grabs of the OpenGL window are unreliable (often black). Use F8.
+
+## Wave 2 addendum (gameplay only, no checkpoint triggered)
+
+- **No new OP objects, LINK changes or phrase constants.**
+  - Chest, masonry, blade and gift shard are drawn in object slots their floor leaves idle (see `docs/gameplay/gate7-integration-brief.md` §4).
+  - A slot may now draw a different image and size per floor. Size and data come from the same per-frame object records that `build_list` already turns into phrases.
+- **Art region:** 37,184 B, packed and phrase-aligned at `$010000`–`$019140` (was ~26 KB). Copied once at boot by the same loop.
+- **State block:** 784 B in `$001000` (was 660). Laid out as an `equ` chain; `P_BASE` (used with 8-bit indexed addressing) stays at 90.
+- **Castle-voice text is state only.** Drawing it (Kimi's `font_data.s` into a CPU buffer, or the HUD buffer) is your Checkpoint B call.
+- Still deferred to your final return: the VC field-bit mask, the NTSC/PAL `CONFIG` byte, and final shadow→LIVE validation.
