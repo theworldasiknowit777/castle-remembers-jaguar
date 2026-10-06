@@ -20,10 +20,10 @@ from jagsim import JagSim, HALFLINES_PER_FRAME  # noqa: E402
 import symbols  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-COF = os.path.join(ROOT, "gate7_castle", "gate7_castle.cof")
+COF = os.environ.get("COF") or os.path.join(ROOT, "gate7_castle", "gate7_castle.cof")
 S = 0x1000
 SYM = symbols.load()
-NOBJ = 18
+NOBJ = int(os.environ.get("NOBJ", "18"))      # 19 for the TEXT_ENABLE build
 LIVE = 0x4000
 
 

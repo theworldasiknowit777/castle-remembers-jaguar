@@ -44,18 +44,31 @@ def _eval(expr, sym):
     return seq(0)[0]
 
 
-def load(path=SRC):
-    sym = {}
-    for name, expr in _EQU.findall(open(path, encoding="utf-8", errors="replace").read()):
-        try:
-            sym[name] = _eval(expr, sym)
-        except (KeyError, IndexError, ValueError):
-            pass                                # forward refs (art labels) are not needed
+_INC = re.compile(r'^\s+\.include\s+"([^"]+)"', re.M)
+
+
+def load(path=SRC, sym=None):
+    """Equates of path and (in order) the .include files beside it."""
+    sym = {} if sym is None else sym
+    src = open(path, encoding="utf-8", errors="replace").read()
+    pos = 0
+    for m in list(_INC.finditer(src)) + [None]:
+        end = m.start() if m else len(src)
+        for name, expr in _EQU.findall(src[pos:end]):
+            try:
+                sym[name] = _eval(expr, sym)
+            except (KeyError, IndexError, ValueError):
+                pass                            # forward refs (art labels) are not needed
+        if m:
+            inc = os.path.join(os.path.dirname(path), m.group(1))
+            if os.path.exists(inc) and not inc.endswith("castle_art.inc"):
+                load(inc, sym)
+            pos = m.end()
     return sym
 
 
 if __name__ == "__main__":
     s = load()
     for k in ("R_BASE", "M_BASE", "P_BASE", "RUNS", "T_DOOR", "DOORS", "LEVERS", "FSPIKE", "FENEMY",
-              "ENEMY", "AX", "LADS", "CHSTATE", "SHARDS", "FBX", "BLADE_CX", "VOICE_ID", "STATE_SIZE"):
+              "ENEMY", "AX", "LADS", "CHSTATE", "SHARDS", "FBX", "BLADE_CX", "MSG_ID", "STATE_SIZE"):
         print("%-11s %4d" % (k, s[k]))

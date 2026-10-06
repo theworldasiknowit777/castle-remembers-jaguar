@@ -136,21 +136,45 @@ swinging blade, the Castle Hound, and castle-voice state.
   - **Bands and decals:** Checkpoint C / B.
   - **V6 font:** the text is ready, see §6. Rendering is Checkpoint B (buffer choice is Bob's).
 
-## 6. Castle voice (state live, rendering pending)
+## 6. Castle voice and HUD row (V6: state + HUD live, text pending Bob B)
 
-- `say(id)` sets `VOICE_ID` and `VOICE_T` (180 frames).
-- `voicetab` holds the canon text (`original/index.html`), uppercase, ASCII, and within Kimi's font glyph set.
-- **Hooks fire for:**
-  - gate shut, bricked, jammed, already open, dud, alarm, gate slam
-  - shard, gift, empty, trap warnings (lever / greedy hands), ceiling warning, heavy braces, hound
-  - every death cause
-  - escape
-  - each floor's whisper on first entry to an adapted floor (`FVOICE` per floor, set by `build_plan`)
-- **Rendering needs** one CPU text buffer (or the HUD buffer) plus Kimi's `font_data.s`. That's Checkpoint B, so this branch doesn't draw text yet.
+- **Ids:** Kimi's V6 `MSG_*` (0–63, verbatim from `docs/visual/sprites/messages.s`) plus 23 gameplay-lane `MSGX_*` (64–86).
+  - `tools/mkmsg.py` generates `gate7_castle/msg_ids.inc` and `messages.inc`.
+  - Each `msgtab` entry: priority, frames, line 1, line 2.
+- **Priority** (higher replaces lower):
+  - 5 death / escape / rebuild
+  - 4 observation / whisper
+  - 3 floor title
+  - 2 gameplay warning
+  - 1 interaction prompt
+- **Queueing:**
+  - A refused or displaced warning or above waits in a 6-slot queue: highest first, FIFO on ties.
+  - Prompts are contextual (re-asserted every frame), so they are simply dropped.
+- **Events wired:**
+  - floor titles on first visit per run
+  - prompts: open, pull, shove, climb, down, sealed, exit
+  - warnings: gate shut / slam / alarm, bricked, dud, jammed, shard, gift shard, trapped lever / chest, ceiling, heavy, hound
+  - death lines per cause
+  - rebuild "THE CASTLE OBSERVED YOU / RECONSTRUCTING…"
+  - canon observation:
+    - death by cause (door / lever side, rush / wait, trap, chest, guard or arrow with floor #)
+    - escape by top tier
+  - run start "…IT HAS WATCHED YOU # TIME(S)." (not on the first run), then the floor-1 whisper
+  - per-floor whispers (Kimi's `W_*`)
+  - escape "YOU ESCAPED", then "THE CASTLE FORGETS / …FOR NOW."
+- **Same memory and same event give the same id** (tested).
+- **`#`** is replaced at draw time by `MSG_ARG`: runs, or floor number.
+- **HUD memory row** (Kimi `V6_HUD_MEMORY_ROW.md`, `hud_icons.s` via `tools/mkfont.py`):
+  - six 8×8 icons + three 3×3 pips (doors, levers, pace, guards, traps, chests)
+  - dim when the tier is 0
+  - the newest pip rings in `HUD_FLASH` for 0.5 s after a rebuild raises a tier
+  - floors and this run's shards sit on a strip underneath
+  - read-only on gameplay state
+- **Text rendering** (`-dTEXT_ENABLE`) needs a new OP object, `NOBJ` 19 and `TEXTBUF`. It waits for Bob's Checkpoint B: `docs/bob/gate7-v6-checkpoint-b.md`.
 
 ## 7. Before competition-ready polish
 
-1. **Castle-voice rendering** (Bob B + Kimi font): whispers, title, "castle observed you", end screens.
+1. **Castle-voice rendering:** built and VJ-verified behind `TEXT_ENABLE`; switch it on once Bob signs off Checkpoint B.
 2. **Kimi art merge:** 21 slots automatic; the ladder (16×244) and the 6 new slots in §5.
 3. **Environment bands** (Bob C).
 4. **Hero animation:** owner-gated.

@@ -88,7 +88,13 @@ STATE           equ     $001000         ; game state block (a5)
 OBJS            equ     $002000         ; object records, 16 bytes each
 LIVE            equ     $004000         ; live OP list (OLP points here)
 SHADOW          equ     $004800         ; next frame's list, copied in blank
-HUDBUF          equ     $00F000         ; 320x6 CRY16 HUD, drawn by the CPU
+HUDBUF          equ     $00F000         ; 160x12 CRY16 HUD (3840 bytes, as before), drawn by the CPU
+HUD_W           equ     160             ; pixels (40 phrases)
+HUD_H           equ     12
+HUD_X           equ     80              ; centred
+HUD_Y           equ     480             ; halflines: Kimi's row band y 224+ (below every floor)
+HUD_PITCH       equ     26              ; one category block: 8x8 icon, three 3x3 pips
+HUD_FLASH_FR    equ     30              ; ~0.5 s ring on a pip that just lit
 PIXBASE         equ     $010000         ; art copied here from ROM
 
 ; ---- objects (list order = draw order) ---------------------
@@ -110,7 +116,21 @@ O_EN1           equ     14
 O_ARROW         equ     15
 O_HERO          equ     16
 O_HUD           equ     17
+; ---- castle-voice text band: assembled only with -dTEXT_ENABLE (Bob
+;      Checkpoint B: one extra OP object + a 12,800-byte CPU text buffer)
+        .if ^^defined TEXT_ENABLE
+O_TEXT          equ     18
+NOBJ            equ     19              ; STOP sits at index NOBJ
+TEXTBUF         equ     $01A000         ; PROPOSED for Bob: 320x20 CRY16, after the art
+TEXT_Y          equ     48              ; halflines: Kimi's message band y 8..22
+FONT_ADV        equ     6               ; Kimi V6 contract: advance 6, pitch 10, 5x7 in 6x8
+FONT_PITCH      equ     10
+TEXT_CLR_ROWS   equ     4               ; per frame: clear 4 rows of the band...
+TEXT_PER_FRAME  equ     3               ; ...or draw 3 glyphs (bounded CPU per frame)
+        .include "font_eq.inc"          ; KFONT_FACE / KFONT_RELIEF from Kimi's font_data.s
+        .else
 NOBJ            equ     18              ; STOP sits at index NOBJ
+        .endif
 
 OB_DATA         equ     0               ; long: DRAM address of pixels
 OB_X            equ     4               ; screen px 0..319 (XPOS = x+177)
@@ -166,43 +186,19 @@ FB_WARN         equ     30              ; frames of shaking before it drops
 FB_RUBBLE       equ     90              ; frames the rubble lies before it resets
 BLADE_REST      equ     188             ; F3 blade rest x (between hole C and door R)
 
-; ---- castle voice message ids (text in voicetab) -------------
-V_GATESHUT      equ     1
-V_BRICKED       equ     2
-V_JAMMED        equ     3
-V_GATEOPEN      equ     4
-V_DUD           equ     5
-V_ALARM         equ     6
-V_SLAM          equ     7
-V_GIFT          equ     8
-V_SHARD         equ     9
-V_EMPTY         equ     10
-V_TRAPRUN       equ     11
-V_GREEDRUN      equ     12
-V_CEILING       equ     13
-V_HEAVY         equ     14
-V_HOUND         equ     15
-V_GOLEFT        equ     16
-V_GORIGHT       equ     17
-V_LEVER         equ     18
-V_RUSH          equ     19
-V_WAIT          equ     20
-V_BRACE         equ     21
-V_WATCH         equ     22
-V_TRAPS         equ     23
-V_GREED         equ     24
-V_EXITMOVED     equ     25
-V_GUARDKILL     equ     26
-V_ARROW         equ     27
-V_SPIKES        equ     28
-V_LEVERKILL     equ     29
-V_CHESTKILL     equ     30
-V_CRUSHED       equ     31
-V_BLADE         equ     32
-V_ESCAPED       equ     33
-V_NOLEAVE       equ     34
-V_LONGLADDER    equ     35
-VOICE_FRAMES    equ     180
+; ---- castle voice: Kimi's V6 MSG_* ids (+ MSGX_* gameplay ids), generated
+;      by tools/mkmsg.py from docs/visual/sprites/messages.s
+        .include "msg_ids.inc"
+        .include "hud_eq.inc"           ; Kimi's HUD palette (tools/mkfont.py)
+
+; ---- message types = priorities (higher interrupts lower) ----
+MT_PROMPT       equ     1               ; interaction prompt
+MT_WARN         equ     2               ; gameplay warning
+MT_TITLE        equ     3               ; floor title
+MT_OBSERVE      equ     4               ; castle observation / memory whisper
+MT_EVENT        equ     5               ; death / escape / rebuild
+MSG_LINE_MAX    equ     53              ; 320 px / FONT_ADV 6
+MSG_QN          equ     6               ; pending-message slots
 
 ; ---- enemy types --------------------------------------------
 T_SKULL         equ     0               ; Sentinel Skull: patrol baseline (Bob's skull)
@@ -334,9 +330,27 @@ FB_T            equ     FB_PH+2
 FB_Y            equ     FB_T+2
 BLADE_CX        equ     FB_Y+2          ; F3 swinging blade rest x (0 none)
 FVOICE          equ     BLADE_CX+2      ; whisper id per floor (5 words)
-VOICE_ID        equ     FVOICE+10       ; castle voice: current message id (0 none)
-VOICE_T         equ     VOICE_ID+2      ; frames left to show it
-STATE_SIZE      equ     VOICE_T+2
+MSG_ID          equ     FVOICE+10       ; castle voice: message on screen (-1 none)
+MSG_PRI         equ     MSG_ID+2        ; its type/priority (0 = nothing showing)
+MSG_T           equ     MSG_PRI+2       ; frames left
+MSG_ARG         equ     MSG_T+2         ; number for its '#' (floor, runs)
+MSG_NEXTARG     equ     MSG_ARG+2       ; caller sets this before say for a '#'
+MSG_DIRTY       equ     MSG_NEXTARG+2   ; text band needs redrawing
+MSG_Q           equ     MSG_DIRTY+2     ; MSG_QN pending: id, pri, arg, 0 (8 bytes each)
+OBS_ID          equ     MSG_Q+(MSG_QN*8) ; observation chosen at the last rebuild
+WON             equ     OBS_ID+2        ; last run escaped
+KILL_ARROW      equ     WON+2           ; death was an arrow (canon: "AN ARROW FOUND YOU")
+DEATH_FLOOR     equ     KILL_ARROW+2
+HUD_PREV        equ     DEATH_FLOOR+2   ; tier per HUD category when last shown (6 words)
+HUD_FL_T        equ     HUD_PREV+(NCAT*2) ; intensify ring frames left
+HUD_FL_CAT      equ     HUD_FL_T+2      ; ...on this category's newest pip
+MSG_SCR         equ     HUD_FL_CAT+2    ; one text line with its digits expanded (64 bytes)
+MSG_DPH         equ     MSG_SCR+64      ; text band drawing: 0 done, 1 clearing, 2/3 line 1/2
+MSG_DROW        equ     MSG_DPH+2       ; next row to clear
+MSG_DI          equ     MSG_DROW+2      ; next glyph of MSG_SCR
+MSG_DX          equ     MSG_DI+2        ; its x
+MSG_DTOP        equ     MSG_DX+2        ; its line's top row
+STATE_SIZE      equ     MSG_DTOP+2
 
 
 ; ============================================================
@@ -364,6 +378,7 @@ start:
         move.w  #STATE_SIZE/4,d0
 .clr:   clr.l   (a0)+
         dbra    d0,.clr
+        move.w  #-1,MSG_ID(a5)          ; nothing on screen
 
         lea     pix_start,a1
         lea     PIXBASE,a0
@@ -424,8 +439,13 @@ main:
         bsr     set_objects
         bsr     build_list
         tst.w   HUDDIRTY(a5)
-        beq.s   .wait_new
-        bsr     draw_hud
+        beq.s   .nohud
+        bsr     draw_hud                ; (a HUD frame skips the text step:
+        bra.s   .wait_new               ;  one CPU-heavy job per frame)
+.nohud:
+        .if ^^defined TEXT_ENABLE
+        bsr     draw_text               ; one bounded step of the text band
+        .endif
 .wait_new:
         move.w  VC,d0
         and.w   #$07FF,d0
@@ -570,12 +590,13 @@ read_pad:
 ; ============================================================
 game_frame:
         bsr     read_pad
-        tst.w   VOICE_T(a5)             ; castle voice: message lifetime
-        beq.s   .vq
-        subq.w  #1,VOICE_T(a5)
-        bne.s   .vq
-        clr.w   VOICE_ID(a5)
-.vq:
+        bsr     msg_tick                ; castle voice: expire / promote pending
+        tst.w   HUD_FL_T(a5)            ; HUD intensify ring
+        beq.s   .hfl
+        subq.w  #1,HUD_FL_T(a5)
+        bne.s   .hfl
+        move.w  #1,HUDDIRTY(a5)
+.hfl:
         move.w  GSTATE(a5),d0
         beq     play_frame
         subq.w  #1,GTIMER(a5)
@@ -599,8 +620,15 @@ game_frame:
 .wt:    tst.w   d1
         bne.s   .out
         moveq   #1,d0
-.end:   bsr     end_run
+.end:   move.w  d0,WON(a5)
+        bsr     end_run
         bsr     build_plan
+        bsr     hud_gains               ; ring the newest pip of a category that rose
+        move.w  #MSG_OBSERVED,d0        ; "THE CASTLE OBSERVED YOU / RECONSTRUCTING"
+        bsr     say
+        bsr     pick_observation        ; canon describeObservation (sets its '#')
+        move.w  OBS_ID(a5),d0
+        bsr     say
         bsr     new_run
 .out:   rts
 
@@ -624,6 +652,10 @@ play_frame:
         bsr     hazards_update
         bsr     props_update
         bsr     exit_check
+        tst.w   GSTATE(a5)
+        bne.s   .np
+        bsr     prompt_update
+.np:
 
         clr.w   BGVAL(a5)
         move.w  WHISPER(a5),d0
@@ -634,18 +666,316 @@ play_frame:
         move.w  #BG_WHISPER,BGVAL(a5)
 .nw:    rts
 
-; say — d0 = castle voice message id. The text is in voicetab; drawing it
-;   waits for a font object (Bob checkpoint B), but the state is live now.
+; ============================================================
+; CASTLE VOICE — message state (presentation only; never touches gameplay)
+;   say d0=id (MSG_NEXTARG = number for a '#'): shown if its priority is >=
+;   the current one's (or nothing shows); same id = refresh only. A refused
+;   or displaced warning/title/observation/event waits in a MSG_QN-slot queue,
+;   highest priority first, FIFO on ties. Preserves every register.
+; ============================================================
 say:
-        move.w  d0,VOICE_ID(a5)
-        move.w  #VOICE_FRAMES,VOICE_T(a5)
+        movem.l d0-d3/a0,-(sp)
+        move.w  MSG_NEXTARG(a5),d3
+        clr.w   MSG_NEXTARG(a5)
+        bsr     msg_entry               ; a0 = entry, d1 = priority
+        tst.w   MSG_T(a5)
+        beq.s   .take
+        cmp.w   MSG_PRI(a5),d1
+        bge.s   .over
+        cmp.w   #MT_WARN,d1             ; lower: warnings and up wait their turn,
+        blt.s   .out                    ; prompts (re-asserted every frame) are dropped
+        bsr     msg_queue
+        bra.s   .out
+.over:  cmp.w   MSG_ID(a5),d0
+        beq.s   .same
+        cmp.w   #MT_WARN,MSG_PRI(a5)    ; displaced warning/title/observation/event:
+        blt.s   .take                   ; queue it if it still had time to run
+        cmp.w   #30,MSG_T(a5)
+        blt.s   .take
+        movem.l d0-d1/d3,-(sp)
+        move.w  MSG_ID(a5),d0
+        move.w  MSG_PRI(a5),d1
+        move.w  MSG_ARG(a5),d3
+        bsr     msg_queue
+        movem.l (sp)+,d0-d1/d3
+.take:  move.w  d0,MSG_ID(a5)
+        move.w  d1,MSG_PRI(a5)
+        move.w  d3,MSG_ARG(a5)
+        move.w  #1,MSG_DIRTY(a5)
+.same:  move.w  2(a0),MSG_T(a5)
+.out:   movem.l (sp)+,d0-d3/a0
         rts
+
+; msg_entry — d0 = id; out a0 = msgtab entry (12 bytes), d1 = priority
+msg_entry:
+        moveq   #0,d1
+        move.w  d0,d1
+        mulu    #12,d1
+        lea     msgtab,a0
+        add.l   d1,a0
+        move.w  (a0),d1
+        rts
+
+; msg_queue — d0 id, d1 pri, d3 arg: insert in priority order (FIFO on
+;   ties); a full queue drops whatever ranks last
+msg_queue:
+        movem.l d4-d5/a1,-(sp)
+        lea     MSG_Q(a5),a1
+        moveq   #MSG_QN-1,d4
+.find:  tst.w   2(a1)                   ; empty slot (pri 0)
+        beq.s   .put
+        cmp.w   (a1),d0                 ; already waiting
+        beq.s   .r
+        cmp.w   2(a1),d1
+        bgt.s   .shift                  ; outranks this one: insert here
+        addq.l  #8,a1
+        dbra    d4,.find
+        bra.s   .r                      ; full of better ones: drop
+.shift: lea     MSG_Q+((MSG_QN-1)*8)(a5),a0
+.sh:    cmp.l   a1,a0
+        beq.s   .put
+        move.l  -8(a0),(a0)
+        move.l  -4(a0),4(a0)
+        subq.l  #8,a0
+        bra.s   .sh
+.put:   move.w  d0,(a1)
+        move.w  d1,2(a1)
+        move.w  d3,4(a1)
+        clr.w   6(a1)
+.r:     movem.l (sp)+,d4-d5/a1
+        rts
+
+; msg_tick — once per frame: count down; when it ends show the next one
+msg_tick:
+        tst.w   MSG_T(a5)
+        beq.s   .idle
+        subq.w  #1,MSG_T(a5)
+        bne.s   .r
+        move.w  #-1,MSG_ID(a5)
+        clr.w   MSG_PRI(a5)
+        move.w  #1,MSG_DIRTY(a5)
+.idle:  tst.w   MSG_Q+2(a5)
+        beq.s   .r
+        move.w  MSG_Q(a5),d0
+        move.w  MSG_Q+4(a5),MSG_NEXTARG(a5)
+        lea     MSG_Q(a5),a0            ; pop the head
+        moveq   #MSG_QN-2,d1
+.pop:   move.l  8(a0),(a0)
+        move.l  12(a0),4(a0)
+        addq.l  #8,a0
+        dbra    d1,.pop
+        clr.l   (a0)
+        clr.l   4(a0)
+        bra     say
+.r:     rts
+
+; pick_observation — canon describeObservation (original/index.html):
+;   death: by cause category (door / lever / pace / trap / chest; guard
+;   or arrow with the floor number); escape: the category the castle now
+;   presses hardest (doors, levers, pace, guards, traps, chests; first on
+;   ties). Same memory and run in, same message out.
+pick_observation:
+        tst.w   WON(a5)
+        bne     .win
+        move.w  CAUSE(a5),d0
+        cmp.w   #C_DOOR,d0
+        bne.s   .d1
+        move.w  #MSG_O_DOOR_L,OBS_ID(a5)
+        move.w  R_BASE+CTR_DOORL(a5),d1
+        cmp.w   R_BASE+CTR_DOORR(a5),d1
+        bhi     .r
+        move.w  #MSG_O_DOOR_R,OBS_ID(a5)
+        rts
+.d1:    cmp.w   #C_LEVER,d0
+        bne.s   .d2
+        move.w  #MSG_O_LEVER_L,OBS_ID(a5)
+        move.w  R_BASE+CTR_LEVL(a5),d1
+        cmp.w   R_BASE+CTR_LEVR(a5),d1
+        bhi     .r
+        move.w  #MSG_O_LEVER_R,OBS_ID(a5)
+        rts
+.d2:    cmp.w   #C_PACE,d0
+        bne.s   .d3
+        move.w  #MSG_O_RUSH,OBS_ID(a5)
+        tst.w   R_BASE+CTR_RUSH(a5)
+        bne     .r
+        move.w  #MSG_O_WAIT,OBS_ID(a5)
+        rts
+.d3:    cmp.w   #C_TRAP,d0
+        bne.s   .d4
+        move.w  #MSG_O_TRAP,OBS_ID(a5)
+        rts
+.d4:    cmp.w   #C_CHEST,d0
+        bne.s   .d5
+        move.w  #MSG_O_CHEST,OBS_ID(a5)
+        rts
+.d5:    move.w  #MSG_O_GUARD,OBS_ID(a5) ; guard (or an arrow) on floor #
+        tst.w   KILL_ARROW(a5)
+        beq.s   .d6
+        move.w  #MSG_O_ARROW,OBS_ID(a5)
+.d6:    move.w  DEATH_FLOOR(a5),d1
+        addq.w  #1,d1
+        move.w  d1,MSG_NEXTARG(a5)
+        rts
+.win:   moveq   #0,d2                   ; best tier so far
+        move.w  #MSG_ESCAPED,OBS_ID(a5)
+        move.w  T_DOOR(a5),d1           ; doors
+        cmp.w   d2,d1
+        ble.s   .w1
+        move.w  d1,d2
+        move.w  #MSG_O_WIN_DOOR_L,OBS_ID(a5)
+        move.w  R_BASE+CTR_DOORL(a5),d0
+        cmp.w   R_BASE+CTR_DOORR(a5),d0
+        bhi.s   .w1
+        move.w  #MSG_O_WIN_DOOR_R,OBS_ID(a5)
+.w1:    move.w  T_LEVER(a5),d1          ; levers
+        cmp.w   d2,d1
+        ble.s   .w2
+        move.w  d1,d2
+        move.w  #MSG_O_WIN_LEVER_L,OBS_ID(a5)
+        move.w  R_BASE+CTR_LEVL(a5),d0
+        cmp.w   R_BASE+CTR_LEVR(a5),d0
+        bhi.s   .w2
+        move.w  #MSG_O_WIN_LEVER_R,OBS_ID(a5)
+.w2:    move.w  T_RUSH(a5),d1           ; pace (plan mode decides the line)
+        move.w  #MSG_O_WIN_RUSH,d0
+        cmp.w   T_WAIT(a5),d1
+        bge.s   .w2a
+        move.w  T_WAIT(a5),d1
+        move.w  #MSG_O_WIN_WAIT,d0
+.w2a:   cmp.w   d2,d1
+        ble.s   .w3
+        move.w  d1,d2
+        move.w  d0,OBS_ID(a5)
+.w3:    move.w  T_BRACE(a5),d1          ; guards
+        move.w  #MSG_O_WIN_BRACE,d0
+        cmp.w   T_WATCH(a5),d1
+        bge.s   .w3a
+        move.w  T_WATCH(a5),d1
+        move.w  #MSG_O_WIN_WATCH,d0
+.w3a:   cmp.w   d2,d1
+        ble.s   .w4
+        move.w  d1,d2
+        move.w  d0,OBS_ID(a5)
+.w4:    move.w  T_TRAP(a5),d1           ; traps
+        cmp.w   d2,d1
+        ble.s   .w5
+        move.w  d1,d2
+        move.w  #MSG_O_WIN_TRAP,OBS_ID(a5)
+.w5:    move.w  T_CHEST(a5),d1          ; chests
+        cmp.w   d2,d1
+        ble.s   .r
+        move.w  #MSG_O_WIN_CHEST,OBS_ID(a5)
+.r:     rts
+
+; prompt_update — the contextual interaction prompt for where the hero is
+;   (lowest priority: shows only when nothing else is speaking)
+prompt_update:
+        tst.w   CLIMB(a5)
+        bne     .r
+        cmp.w   #GROUND_Y,HY(a5)
+        bne     .r
+        cmp.w   #4,FLOOR(a5)            ; the exit
+        bne.s   .lad
+        move.w  EXIT_X(a5),d1
+        add.w   #16,d1
+        bsr     near_hero
+        bne.s   .lad
+        move.w  #MSG_P_EXIT,d0
+        bra     say
+.lad:   moveq   #1,d0                   ; a ladder foot / hole
+        bsr     find_ladder
+        tst.w   d1
+        bmi.s   .hole
+        bsr     gate_blocks
+        tst.w   d0
+        bne.s   .hole
+        move.w  #MSG_P_CLIMB,d0
+        bra     say
+.hole:  moveq   #2,d0
+        bsr     find_ladder
+        tst.w   d1
+        bmi.s   .grd
+        move.w  #MSG_P_DOWN,d0
+        bra     say
+.grd:   lea     ENEMY(a5),a0            ; a guard to shove
+        moveq   #1,d7
+.g:     tst.w   E_TYPE(a0)
+        bmi.s   .gn
+        tst.w   E_STUN(a0)
+        bne.s   .gn
+        cmp.w   #T_HOUND,E_TYPE(a0)
+        beq.s   .gn
+        move.w  E_X(a0),d0
+        asr.w   #4,d0
+        sub.w   HX(a5),d0
+        muls    FACING(a5),d0
+        cmp.w   #-3,d0
+        ble.s   .gn
+        cmp.w   #28,d0
+        bge.s   .gn
+        move.w  #MSG_P_SHOVE,d0
+        bra     say
+.gn:    lea     32(a0),a0
+        dbra    d7,.g
+        move.w  FLOOR(a5),d0            ; a lever
+        cmp.w   #1,d0
+        beq.s   .lv
+        cmp.w   #3,d0
+        bne.s   .ch
+.lv:    bsr     gate_ptr
+        tst.w   G_OPEN(a1)
+        bne.s   .ch
+        move.w  #LEVER_LX+4,d1
+        bsr     near_hero
+        beq.s   .pull
+        move.w  #LEVER_RX+4,d1
+        bsr     near_hero
+        bne.s   .ch
+.pull:  move.w  #MSG_P_PULL,d0
+        bra     say
+.ch:    move.w  FLOOR(a5),d0            ; a shut chest
+        cmp.w   #4,d0
+        bge.s   .dr
+        add.w   d0,d0
+        lea     CHSTATE(a5),a0
+        tst.w   0(a0,d0.w)
+        bne.s   .dr
+        lea     chestx,a0
+        move.w  0(a0,d0.w),d1
+        addq.w  #8,d1
+        bsr     near_hero
+        bne.s   .dr
+        move.w  #MSG_P_OPEN,d0
+        bra     say
+.dr:    lea     DOORS(a5),a0            ; a door: open, or sealed
+        move.w  FLOOR(a5),d0
+        beq.s   .df
+        cmp.w   #2,d0
+        bne.s   .r
+        lea     16(a0),a0
+.df:    moveq   #1,d7
+.dl:    tst.w   D_OPEN(a0)
+        bne.s   .dn
+        move.w  D_X(a0),d1
+        addq.w  #4,d1
+        bsr     near_hero
+        bne.s   .dn
+        move.w  #MSG_P_OPEN,d0
+        tst.w   D_LOCK(a0)
+        beq     say
+        move.w  #MSG_P_SEALED,d0
+        bra     say
+.dn:    lea     8(a0),a0
+        dbra    d7,.dl
+.r:     rts
 
 ; kill — d0 = memory category of the cause
 kill:
         tst.w   GSTATE(a5)
         bne.s   .qk
         move.w  d0,CAUSE(a5)
+        move.w  FLOOR(a5),DEATH_FLOOR(a5)
         move.w  #1,GSTATE(a5)
         move.w  #DEATH_FRAMES,GTIMER(a5)
         clr.w   CLIMB(a5)
@@ -675,7 +1005,7 @@ hero_update:
         beq.s   .gok
         btst    #P_UP,PADNEW+1(a5)
         beq.s   .nomount
-        moveq   #V_GATESHUT,d0
+        move.w  #MSGX_GATE_SHUT,d0
         bsr     say
         bra.s   .nomount
 .gok:   moveq   #1,d0
@@ -960,7 +1290,7 @@ do_act:
         bge.s   .shn
         cmp.w   #T_HOUND,E_TYPE(a0)     ; the hound will not be pushed
         bne     shove
-        moveq   #V_HOUND,d0
+        move.w  #MSGX_HOUND,d0
         bsr     say
 .shn:   lea     32(a0),a0
         dbra    d7,.sh
@@ -1006,7 +1336,7 @@ do_act:
         rts
 .bricked:
         move.w  #12,WHISPER(a5)         ; brief ember flash: "bricked up"
-        moveq   #V_BRICKED,d0
+        move.w  #MSGX_BRICKED,d0
         bra     say
 .dn:    lea     8(a0),a0
         dbra    d7,.dl
@@ -1030,7 +1360,7 @@ try_chest:
         lea     CHSTATE(a5),a0
         tst.w   0(a0,d3.w)
         beq.s   .open
-        moveq   #V_EMPTY,d0
+        move.w  #MSGX_EMPTY,d0
         bsr     say
         moveq   #1,d0
         rts
@@ -1044,13 +1374,13 @@ try_chest:
         move.w  d2,EX(a5)
         move.w  #ERUPT_WARN+ERUPT_LIVE,ET(a5)
         move.w  #C_CHEST,ECAUSE(a5)
-        moveq   #V_GREEDRUN,d0
+        move.w  #MSGX_TRAP_CHEST,d0
         bsr     say
         moveq   #1,d0
         rts
 .real:  addq.w  #1,SHARDS(a5)
         move.w  #1,HUDDIRTY(a5)
-        moveq   #V_SHARD,d0
+        move.w  #MSGX_SHARD,d0
         bsr     say
         moveq   #1,d0
 .tr:    rts
@@ -1076,7 +1406,7 @@ shove:
         beq.s   .norm
         subq.w  #1,E_ARM(a0)
         move.w  #36,E_STUN(a0)
-        moveq   #V_HEAVY,d0
+        move.w  #MSGX_HEAVY,d0
         bsr     say
         moveq   #21,d1
         bra.s   .push
@@ -1112,12 +1442,12 @@ clamp_ex:
 pull_lever:
         cmp.w   #2,LV_STATE(a0)
         bne.s   .nj
-        moveq   #V_JAMMED,d0
+        move.w  #MSGX_JAMMED,d0
         bra     say
 .nj:    bsr     gate_ptr
         tst.w   G_OPEN(a1)
         beq.s   .ng
-        moveq   #V_GATEOPEN,d0
+        move.w  #MSGX_GATE_OPEN,d0
         bra     say
 .ng:
         addq.w  #1,R_BASE+CTR_PULLS(a5)
@@ -1133,11 +1463,11 @@ pull_lever:
         move.w  #2,LV_STATE(a0)         ; dud or trap: sprung for good
         cmp.w   #2,d0
         beq.s   .trap
-        moveq   #V_DUD,d0
+        move.w  #MSGX_DUD,d0
         bra     say
 .trap:  addq.w  #1,R_BASE+CTR_TRAPS(a5) ; trap: eruption at the lever
         move.w  #C_LEVER,ECAUSE(a5)
-        moveq   #V_TRAPRUN,d0
+        move.w  #MSGX_TRAP_LEVER,d0
         bsr     say
         move.w  #LEVER_LX+4-32,d1
         tst.w   d6
@@ -1146,7 +1476,7 @@ pull_lever:
 .ex:    move.w  d1,EX(a5)
         move.w  #ERUPT_WARN+ERUPT_LIVE,ET(a5)
 .qr:     rts
-.alarm: moveq   #V_ALARM,d0
+.alarm: move.w  #MSGX_ALARM,d0
         bsr     say
         move.l  a0,-(sp)                ; every guard on the floor wakes...
         lea     ENEMY(a5),a0
@@ -1186,7 +1516,7 @@ gate_update:
         beq.s   .qr
 .shut:  clr.w   G_OPEN(a1)
         clr.w   G_T(a1)
-        moveq   #V_SLAM,d0
+        move.w  #MSGX_SLAM,d0
         bsr     say
         lea     LEVERS(a5),a0
         cmp.w   #1,FLOOR(a5)
@@ -1292,7 +1622,7 @@ enemies_update:
         bsr     enemy_touch
         tst.w   d0
         beq     .next
-        moveq   #V_GUARDKILL,d0
+        move.w  #MSGX_D_GUARD,d0
         bsr     say
         move.w  E_ORG(a0),d0
         bsr     kill
@@ -1377,7 +1707,7 @@ enemies_update:
         bsr     enemy_touch
         tst.w   d0
         beq.s   .next
-        moveq   #V_GUARDKILL,d0
+        move.w  #MSGX_D_GUARD,d0
         bsr     say
         move.w  E_ORG(a0),d0
         bsr     kill
@@ -1459,7 +1789,8 @@ arrow_update:
         cmp.w   #FLOOR_HL-24,d0         ; knee height: jump to dodge
         ble.s   .qr
         clr.w   AON(a5)
-        moveq   #V_ARROW,d0
+        move.w  #1,KILL_ARROW(a5)
+        move.w  #MSGX_D_ARROW,d0
         bsr     say
         moveq   #C_GUARD,d0
         bra     kill
@@ -1498,7 +1829,7 @@ hazards_update:
         cmp.w   d1,d0
         ble.s   .sn
         addq.w  #1,R_BASE+CTR_TRAPS(a5)
-        moveq   #V_SPIKES,d0
+        move.w  #MSGX_D_SPIKES,d0
         bsr     say
         move.w  SP_ORG(a0),d0
         bra     kill
@@ -1525,10 +1856,10 @@ hazards_update:
         addq.w  #8,d0
         cmp.w   EX(a5),d0
         ble.s   .qr
-        moveq   #V_LEVERKILL,d0
+        move.w  #MSGX_D_LEVER,d0
         cmp.w   #C_CHEST,ECAUSE(a5)
         bne.s   .ev
-        moveq   #V_CHESTKILL,d0
+        move.w  #MSGX_D_CHEST,d0
 .ev:    bsr     say
         move.w  ECAUSE(a5),d0
         bra     kill
@@ -1559,7 +1890,7 @@ props_update:
         move.w  #1,GIFT_TAKEN(a5)
         addq.w  #1,SHARDS(a5)
         move.w  #1,HUDDIRTY(a5)
-        moveq   #V_GIFT,d0
+        move.w  #MSGX_GIFT_SHARD,d0
         bsr     say
 .ng:
         ; ---- falling masonry: punishes standing still under cracks ----
@@ -1589,7 +1920,7 @@ props_update:
         blt     .nb
         move.w  #1,FB_PH(a5)
         move.w  #FB_WARN,FB_T(a5)
-        moveq   #V_CEILING,d0
+        move.w  #MSGX_CEILING,d0
         bsr     say
         bra     .nb
 .warn:  subq.w  #1,FB_T(a5)
@@ -1621,7 +1952,7 @@ props_update:
         addq.w  #8,d2
         cmp.w   d2,d0
         ble.s   .nb
-        moveq   #V_CRUSHED,d0
+        move.w  #MSGX_D_CEILING,d0
         bsr     say
         moveq   #C_PACE,d0
         bra     kill
@@ -1654,7 +1985,7 @@ props_update:
         add.w   #48,d0
         cmp.w   d0,d2
         bge.s   .r
-        moveq   #V_BLADE,d0
+        move.w  #MSGX_D_BLADE,d0
         bsr     say
         moveq   #C_PACE,d0
         bra     kill
@@ -1736,7 +2067,9 @@ exit_check:
         bge.s   .qr
         move.w  #2,GSTATE(a5)
         move.w  #WIN_FRAMES,GTIMER(a5)
-        moveq   #V_ESCAPED,d0
+        move.w  #MSGX_ESCAPE,d0         ; "YOU ESCAPED / THE CASTLE WILL REMEMBER HOW."
+        bsr     say
+        move.w  #MSG_FORGETS,d0         ; canon: "THE CASTLE FORGETS / ...for now."
         bsr     say
 .qr:     rts
 
@@ -1762,8 +2095,7 @@ new_run:
         dbra    d0,.cs
         clr.w   SHARDS(a5)
         clr.w   GIFT_TAKEN(a5)
-        clr.w   VOICE_ID(a5)
-        clr.w   VOICE_T(a5)
+        clr.w   KILL_ARROW(a5)
         move.w  #LAD_C,HX(a5)
         move.w  #GROUND_Y,HY(a5)
         move.w  #1,FACING(a5)
@@ -1771,7 +2103,15 @@ new_run:
         bsr     enter_floor
         tst.w   RUNS(a5)
         beq.s   .qr
-        tst.w   NOTES(a5)               ; rebuilt castle: it remembers
+        move.w  RUNS(a5),d0             ; canon: "...it has watched you N times."
+        beq.s   .qr                     ; (not on the very first run)
+        move.w  d0,MSG_NEXTARG(a5)
+        move.w  #MSG_WATCHEDN,d0
+        cmp.w   #1,RUNS(a5)
+        bne.s   .wn
+        move.w  #MSG_WATCHED1,d0
+.wn:    bsr     say
+        tst.w   NOTES(a5)               ; ...then this floor's whisper
         beq.s   .qr
         move.w  #WHISPER_FRAMES,WHISPER(a5)
         move.w  FVOICE(a5),d0
@@ -1790,7 +2130,11 @@ enter_floor:
         bne.s   .seen
         bset    d0,d1
         move.w  d1,SEEN(a5)
-        move.w  NOTES(a5),d1
+        move.w  d0,-(sp)                ; first visit this run: the floor's title...
+        add.w   #MSG_F1,d0
+        bsr     say
+        move.w  (sp)+,d0
+        move.w  NOTES(a5),d1            ; ...then the castle's whisper if it changed it
         btst    d0,d1
         beq.s   .seen
         tst.w   d0
@@ -2158,7 +2502,7 @@ build_plan:
         bne     place
         move.w  #EXIT_LX,EXIT_X(a5)
         bset    #4,NOTES+1(a5)
-        move.w  #V_EXITMOVED,FVOICE+(4*2)(a5)
+        move.w  #MSG_W_EXIT_MOVED,FVOICE+(4*2)(a5)
 
 place:
         ; ---- base guard type (watch -> chasers, brace 3 -> heavies)
@@ -2265,22 +2609,24 @@ place:
 .g4a:   cmp.w   #C_PACE,d7
         bne.s   .doors
         bset    #4,NOTES+1(a5)
-        move.w  #V_RUSH,FVOICE+(4*2)(a5)
+        move.w  #MSG_W_RUSH,FVOICE+(4*2)(a5)
         tst.w   T_RUSH(a5)
         bne.s   .doors
-        move.w  #V_WAIT,FVOICE+(4*2)(a5)
+        move.w  #MSG_W_WAIT,FVOICE+(4*2)(a5)
 
         ; ---- DOOR habit -------------------------------------
 .doors: move.w  T_DOOR(a5),d0
         beq     .levers
         bset    #0,NOTES+1(a5)
         bset    #2,NOTES+1(a5)
-        moveq   #V_GOLEFT,d2
+        move.w  #MSG_W_DOOR_L,d2        ; F1: "you always go left/right."
+        move.w  #MSG_W_DOOR_GIFT_R,d3   ; F3: "the other door was left open for you."
         tst.w   SIDE_DOOR(a5)
         bmi.s   .dv
-        moveq   #V_GORIGHT,d2
+        move.w  #MSG_W_DOOR_R,d2
+        move.w  #MSG_W_DOOR_GIFT_L,d3
 .dv:    move.w  d2,FVOICE+(0*2)(a5)
-        move.w  d2,FVOICE+(2*2)(a5)
+        move.w  d3,FVOICE+(2*2)(a5)
         moveq   #0,d1                   ; d1 = favoured slot (0 L / 1 R)
         tst.w   SIDE_DOOR(a5)
         bmi.s   .ds
@@ -2348,7 +2694,7 @@ place:
 .llr:   move.w  #5,LADS+6(a5)           ; favoured L: long ladder on the right
         move.w  #7,LADS+22(a5)
         move.w  #3,LADS+30(a5)
-.lld:   move.w  #V_LONGLADDER,FVOICE+(1*2)(a5)
+.lld:   move.w  FVOICE+(0*2)(a5),FVOICE+(1*2)(a5)   ; F2: the habit that grew the long ladder
         bset    #1,NOTES+1(a5)
         ; t>=2: favoured F1 door moves tight against the spikes
         tst.w   SIDE_DOOR(a5)
@@ -2377,6 +2723,11 @@ place:
         moveq   #-1,d2
         lea     8(a1),a1
 .dhp:   move.w  #1,D_LOCK(a1)
+        move.w  #MSG_W_DOOR_GONE_L,FVOICE+(2*2)(a5)    ; "the left/right way is gone."
+        tst.w   SIDE_DOOR(a5)
+        bmi.s   .dgn
+        move.w  #MSG_W_DOOR_GONE_R,FVOICE+(2*2)(a5)
+.dgn:
         moveq   #C_DOOR,d7
         bsr     set_enemy
 
@@ -2386,8 +2737,8 @@ place:
         beq.s   .pace
         bset    #1,NOTES+1(a5)
         bset    #3,NOTES+1(a5)
-        move.w  #V_LEVER,FVOICE+(1*2)(a5)
-        move.w  #V_LEVER,FVOICE+(3*2)(a5)
+        move.w  #MSG_W_LEVER_TRUST,FVOICE+(1*2)(a5)
+        move.w  #MSG_W_LEVER_HERE,FVOICE+(3*2)(a5)
         moveq   #0,d1                   ; byte offset of favoured lever
         moveq   #4,d2                   ; ... and of the other one
         tst.w   SIDE_LEVER(a5)
@@ -2409,7 +2760,7 @@ place:
         beq     .wait
         move.w  #BLADE_REST,BLADE_CX(a5) ; t>=1: a blade swings on F3 (pass on the back-swing)
         bset    #2,NOTES+1(a5)
-        move.w  #V_RUSH,FVOICE+(2*2)(a5)
+        move.w  #MSG_W_RUSH,FVOICE+(2*2)(a5)
         cmp.w   #2,d0
         blt     .guards
         bset    #2,NOTES+1(a5)
@@ -2427,7 +2778,7 @@ place:
         cmp.w   #3,T_RUSH(a5)
         blt     .guards
         bset    #1,NOTES+1(a5)
-        move.w  #V_RUSH,FVOICE+(1*2)(a5)
+        move.w  #MSG_W_RUSH,FVOICE+(1*2)(a5)
         lea     FSPIKE+(1*16)(a5),a0      ; spikes flank the F2 centre ladder
         move.w  #114,SP_X(a0)
         move.w  #190,8+SP_X(a0)
@@ -2442,8 +2793,8 @@ place:
         beq.s   .guards
         bset    #1,NOTES+1(a5)
         bset    #3,NOTES+1(a5)
-        move.w  #V_WAIT,FVOICE+(1*2)(a5)
-        move.w  #V_WAIT,FVOICE+(3*2)(a5)
+        move.w  #MSG_W_WAIT,FVOICE+(1*2)(a5)
+        move.w  #MSG_W_WAIT,FVOICE+(3*2)(a5)
         lea     closetab,a0
         add.w   d0,d0
         move.w  -2(a0,d0.w),AUTOCLOSE(a5)
@@ -2459,15 +2810,15 @@ place:
         beq.s   .watch
         move.w  #72,STUN_T(a5)          ; shoves stun for less
         bset    #4,NOTES+1(a5)
-        move.w  #V_BRACE,FVOICE+(4*2)(a5)
+        move.w  #MSG_W_BRACE,FVOICE+(4*2)(a5)
         cmp.w   #2,d0
         blt.s   .watch
         bset    #1,NOTES+1(a5)          ; t>=2: the F2 hound
-        move.w  #V_BRACE,FVOICE+(1*2)(a5)
+        move.w  #MSG_W_BRACE,FVOICE+(1*2)(a5)
 .watch: cmp.w   #3,T_WATCH(a5)
         blt.s   .traps
         bset    #3,NOTES+1(a5)
-        move.w  #V_WATCH,FVOICE+(3*2)(a5)
+        move.w  #MSG_W_WATCH,FVOICE+(3*2)(a5)
         lea     FENEMY+(3*64)+32(a5),a0   ; a Stone Watcher on F4
         moveq   #T_WATCHER,d0
         move.w  #52,d1
@@ -2481,14 +2832,14 @@ place:
 .traps: move.w  T_TRAP(a5),d0
         beq     .chests
         bset    #2,NOTES+1(a5)
-        move.w  #V_TRAPS,FVOICE+(2*2)(a5)
+        move.w  #MSG_W_TRAP,FVOICE+(2*2)(a5)
         move.w  #24,FSPIKE+(2*16)+SP_W(a5) ; F3 spikes widen
         move.w  #320-55-24,FSPIKE+(2*16)+8+SP_X(a5)
         move.w  #24,FSPIKE+(2*16)+8+SP_W(a5)
         cmp.w   #2,d0
         blt.s   .chests
         bset    #3,NOTES+1(a5)
-        move.w  #V_TRAPS,FVOICE+(3*2)(a5)
+        move.w  #MSG_W_TRAP,FVOICE+(3*2)(a5)
         lea     FSPIKE+(3*16)(a5),a0
         move.w  #190,SP_X(a0)
         move.w  #16,SP_W(a0)
@@ -2497,7 +2848,7 @@ place:
         cmp.w   #3,d0
         blt.s   .chests
         bset    #4,NOTES+1(a5)
-        move.w  #V_TRAPS,FVOICE+(4*2)(a5)
+        move.w  #MSG_W_TRAP,FVOICE+(4*2)(a5)
         lea     FSPIKE+(4*16)(a5),a0      ; spikes beside the exit
         move.w  #255,SP_X(a0)
         cmp.w   #EXIT_RX,EXIT_X(a5)
@@ -2513,23 +2864,23 @@ place:
         beq.s   .esc
         move.w  #1,CHTRAP+(3*2)(a5)     ; t1: F4
         bset    #3,NOTES+1(a5)
-        move.w  #V_GREED,FVOICE+(3*2)(a5)
+        move.w  #MSG_W_CHEST,FVOICE+(3*2)(a5)
         cmp.w   #2,d0
         blt.s   .esc
         move.w  #1,CHTRAP+(1*2)(a5)     ; t2: F2
         bset    #1,NOTES+1(a5)
-        move.w  #V_GREED,FVOICE+(1*2)(a5)
+        move.w  #MSG_W_CHEST,FVOICE+(1*2)(a5)
         cmp.w   #3,d0
         blt.s   .esc
         move.w  #1,CHTRAP+(0*2)(a5)     ; t3: F1
         bset    #0,NOTES+1(a5)
-        move.w  #V_GREED,FVOICE+(0*2)(a5)
+        move.w  #MSG_W_CHEST,FVOICE+(0*2)(a5)
 
         ; ---- ESCAPES: a Stone Watcher guards the exit -------------
 .esc:   cmp.w   #2,WINS(a5)
         blt.s   .qr
         bset    #4,NOTES+1(a5)
-        move.w  #V_NOLEAVE,FVOICE+(4*2)(a5)
+        move.w  #MSG_W_EXIT_GUARD,FVOICE+(4*2)(a5)
         lea     FENEMY+(4*64)+32(a5),a0
         moveq   #T_WATCHER,d0
         move.w  #219,d1
@@ -2875,39 +3226,111 @@ set_objects:
         beq.s   .hv
         clr.w   OB_H(a1)
 .hv:
+        .if ^^defined TEXT_ENABLE
+        ; ---- castle-voice text band (Checkpoint B build) -------------
+        lea     O_TEXT*16(a4),a1
+        move.l  #TEXTBUF,OB_DATA(a1)
+        clr.w   OB_X(a1)
+        move.w  #TEXT_Y,OB_Y(a1)
+        move.w  #80,OB_W(a1)
+        clr.w   OB_H(a1)
+        tst.w   MSG_PRI(a5)
+        beq.s   .ntx
+        cmp.w   #1,MSG_DPH(a5)          ; hidden while the old text is cleared
+        beq.s   .ntx
+        move.w  #20,OB_H(a1)
+.ntx:
+        .endif
         ; ---- HUD -----------------------------------------------
         lea     O_HUD*16(a4),a1
         move.l  #HUDBUF,OB_DATA(a1)
-        clr.w   OB_X(a1)
-        move.w  #40,OB_Y(a1)             ; VJ shows from about halfline 32
-        move.w  #6,OB_H(a1)
-        move.w  #80,OB_W(a1)
+        move.w  #HUD_X,OB_X(a1)
+        move.w  #HUD_Y,OB_Y(a1)         ; VJ shows from about halfline 32
+        move.w  #HUD_H,OB_H(a1)
+        move.w  #HUD_W*2/8,OB_W(a1)
         rts
 
 ; ============================================================
-; draw_hud — floor pips (left) and memory pips (right)
+; draw_hud — Kimi's V6 memory row: six blocks (doors, levers, pace, guards,
+;   traps, chests), each an 8x8 icon + three 3x3 pips = the category tier.
+;   Tier 0: dim icon, hollow dim pips. Tier n: lit icon, n lit pips; a pip
+;   that just lit wears a HUD_FLASH ring for HUD_FLASH_FR frames.
+;   Strip below (rows 9-10): floors (left) and this run's shards (right).
+;   Read-only on gameplay state.
 ; ============================================================
 draw_hud:
         clr.w   HUDDIRTY(a5)
         lea     HUDBUF,a0
-        move.w  #320*6*2/4-1,d0
-.qc:     clr.l   (a0)+
+        move.w  #(HUD_W*HUD_H*2/4)-1,d0
+.qc:    clr.l   (a0)+
         dbra    d0,.qc
+        moveq   #0,d6                   ; category
+.qm:    move.w  d6,d0
+        bsr     hud_tier                ; d4 = tier, a3 = hudcats entry
+        move.w  d6,d0
+        mulu    #HUD_PITCH,d0
+        addq.w  #2,d0                   ; d0 = block x
+        move.w  d0,-(sp)
+        move.w  6(a3),d3                ; dim
+        tst.w   d4
+        beq.s   .ic
+        move.w  4(a3),d3                ; lit
+.ic:    lea     hud_icons,a1
+        move.w  d6,d1
+        lsl.w   #3,d1
+        add.w   d1,a1
+        bsr     hud_icon
+        moveq   #0,d5                   ; pip
+.mp:    move.w  (sp),d0
+        add.w   #10,d0
+        move.w  d5,d1
+        lsl.w   #2,d1
+        add.w   d1,d0                   ; x+10+4n
+        moveq   #2,d1                   ; y 2
+        moveq   #3,d2
+        moveq   #3,d3
+        cmp.w   d4,d5
+        bge.s   .hol
+        move.w  4(a3),d7                ; lit pip
+        bsr     hud_box
+        tst.w   HUD_FL_T(a5)
+        beq.s   .nx
+        cmp.w   HUD_FL_CAT(a5),d6
+        bne.s   .nx
+        move.w  d5,d1
+        addq.w  #1,d1
+        cmp.w   d4,d1
+        bne.s   .nx
+        moveq   #2,d1                   ; (d1 held the pip test: y again)
+        move.w  #HUD_FLASH,d7           ; the newest pip: white ring, lit core
+        bsr     hud_ring
+        bra.s   .nx
+.hol:   move.w  6(a3),d7                ; hollow dim pip
+        bsr     hud_ring
+.nx:    addq.w  #1,d5
+        cmp.w   #3,d5
+        blt.s   .mp
+        addq.l  #2,sp
+        addq.w  #1,d6
+        cmp.w   #NCAT,d6
+        blt     .qm
         ; floors: current gold, visited stone, unseen dark
         moveq   #0,d6
-.qf:     move.w  #$671E,d2
+.qf:    move.w  #$671E,d7
         move.w  SEEN(a5),d0
         btst    d6,d0
         beq.s   .fc
-        move.w  #$8883,d2
+        move.w  #$8883,d7
 .fc:    cmp.w   FLOOR(a5),d6
         bne.s   .fd
-        move.w  #$EAE7,d2
+        move.w  #$EAE7,d7
 .fd:    move.w  d6,d0
-        mulu    #10,d0
-        addq.w  #4,d0
-        moveq   #7,d1
-        bsr     hud_rect
+        lsl.w   #3,d0
+        addq.w  #2,d0
+        moveq   #9,d1
+        moveq   #6,d2
+        moveq   #2,d3
+        bsr     hud_box
         addq.w  #1,d6
         cmp.w   #5,d6
         blt.s   .qf
@@ -2918,61 +3341,260 @@ draw_hud:
         cmp.w   #8,d6
         bge.s   .shd
         move.w  d6,d0
-        mulu    #7,d0
-        add.w   #60,d0
-        moveq   #5,d1
-        move.w  #$78F1,d2
-        bsr     hud_rect
+        mulu    #6,d0
+        add.w   #110,d0
+        moveq   #9,d1
+        moveq   #4,d2
+        moveq   #2,d3
+        move.w  #$78F1,d7
+        bsr     hud_box
         addq.w  #1,d6
         bra.s   .sh
-.shd:
-        ; memory: six categories x three pips (tier)
+.shd:   rts
+
+; hud_tier — d0 = category; out d4 = tier (max of its two), a3 = hudcats entry
+hud_tier:
         lea     hudcats,a3
-        moveq   #0,d6
-.qm:     move.w  (a3)+,d0                ; tier offset (or two, max taken)
+        lsl.w   #3,d0
+        add.w   d0,a3
+        move.w  (a3),d0
         move.w  0(a5,d0.w),d4
-        move.w  (a3)+,d0
-        beq.s   .m1
-        move.w  0(a5,d0.w),d1
-        cmp.w   d1,d4
-        bge.s   .m1
-        move.w  d1,d4
-.m1:    move.w  (a3)+,d3                ; category colour
-        moveq   #0,d5
-.mp:    move.w  #$671E,d2
-        cmp.w   d4,d5
-        bge.s   .mc
-        move.w  d3,d2
-.mc:    move.w  d6,d0
-        mulu    #26,d0
-        add.w   #160,d0
-        move.w  d5,d1
-        mulu    #8,d1
-        add.w   d1,d0
-        moveq   #6,d1
-        bsr     hud_rect
-        addq.w  #1,d5
-        cmp.w   #3,d5
-        blt.s   .mp
+        move.w  2(a3),d0
+        beq.s   .r
+        move.w  0(a5,d0.w),d0
+        cmp.w   d0,d4
+        bge.s   .r
+        move.w  d0,d4
+.r:     rts
+
+; hud_gains — after a rebuild: the last category whose tier rose gets the
+;   intensify ring; remember every tier for next time
+hud_gains:
+        movem.l d0-d6/a3,-(sp)
+        moveq   #0,d6
+.g:     move.w  d6,d0
+        bsr     hud_tier
+        move.w  d6,d0
+        add.w   d0,d0
+        lea     HUD_PREV(a5),a3
+        cmp.w   0(a3,d0.w),d4
+        ble.s   .n
+        move.w  d6,HUD_FL_CAT(a5)
+        move.w  #HUD_FLASH_FR,HUD_FL_T(a5)
+.n:     move.w  d4,0(a3,d0.w)
         addq.w  #1,d6
         cmp.w   #NCAT,d6
-        blt.s   .qm
+        blt.s   .g
+        move.w  #1,HUDDIRTY(a5)
+        movem.l (sp)+,d0-d6/a3
         rts
 
-; hud_rect — d0 = x, d1 = width, d2 = colour; rows 1..4
-hud_rect:
-        lea     HUDBUF+640,a0
-        add.w   d0,d0
+; hud_addr — d0 = x, d1 = y; out a0 = HUDBUF pixel
+hud_addr:
+        lea     HUDBUF,a0
+        move.w  d1,-(sp)
+        mulu    #HUD_W*2,d1
+        add.l   d1,a0
+        move.w  (sp)+,d1
         add.w   d0,a0
-        moveq   #3,d7
-.qr:     move.l  a0,a1
-        move.w  d1,d0
-        subq.w  #1,d0
-.qx:     move.w  d2,(a1)+
-        dbra    d0,.qx
-        lea     640(a0),a0
-        dbra    d7,.qr
+        add.w   d0,a0
         rts
+
+; hud_box — d0 x, d1 y, d2 w, d3 h, d7 colour (keeps d0-d6)
+hud_box:
+        movem.l d0-d3/a0-a1,-(sp)
+        bsr     hud_addr
+        subq.w  #1,d3
+.r:     move.l  a0,a1
+        move.w  d2,d0
+        subq.w  #1,d0
+.bx:    move.w  d7,(a1)+
+        dbra    d0,.bx
+        lea     HUD_W*2(a0),a0
+        dbra    d3,.r
+        movem.l (sp)+,d0-d3/a0-a1
+        rts
+
+; hud_ring — 3x3 outline at d0 x, d1 y in d7 (keeps d0-d6)
+hud_ring:
+        movem.l d0-d1/a0,-(sp)
+        bsr     hud_addr
+        move.w  d7,(a0)
+        move.w  d7,2(a0)
+        move.w  d7,4(a0)
+        move.w  d7,HUD_W*2(a0)
+        move.w  d7,HUD_W*2+4(a0)
+        move.w  d7,HUD_W*4(a0)
+        move.w  d7,HUD_W*4+2(a0)
+        move.w  d7,HUD_W*4+4(a0)
+        movem.l (sp)+,d0-d1/a0
+        rts
+
+; hud_icon — a1 = 8 bytes (bit 7 = leftmost), d0 = x (row 0), d3 = colour
+hud_icon:
+        movem.l d0-d2/d5/a0-a1,-(sp)
+        moveq   #0,d1
+        bsr     hud_addr
+        moveq   #7,d2
+.row:   move.b  (a1)+,d5
+        moveq   #7,d1
+        move.l  a0,-(sp)
+.col:   btst    d1,d5
+        beq.s   .n
+        move.w  d3,(a0)
+.n:     addq.l  #2,a0
+        dbra    d1,.col
+        move.l  (sp)+,a0
+        lea     HUD_W*2(a0),a0
+        dbra    d2,.row
+        movem.l (sp)+,d0-d2/d5/a0-a1
+        rts
+
+        .if ^^defined TEXT_ENABLE
+; ============================================================
+; draw_text — one step per frame of drawing the current message's two lines
+;   into TEXTBUF with Kimi's V6 font (font.inc from font_data.s via
+;   tools/mkfont.py): clear TEXT_CLR_ROWS rows, or draw TEXT_PER_FRAME
+;   glyphs, so a new message costs a bounded slice of each frame and types
+;   in over ~1/3 s. Centred; '#' becomes MSG_ARG in decimal; relief (+1,+1)
+;   under the face. A new message (MSG_DIRTY) restarts it.
+; ============================================================
+draw_text:
+        tst.w   MSG_DIRTY(a5)
+        beq.s   .go
+        clr.w   MSG_DIRTY(a5)
+        move.w  #1,MSG_DPH(a5)
+        clr.w   MSG_DROW(a5)
+.go:    move.w  MSG_DPH(a5),d0
+        beq     .r
+        cmp.w   #1,d0
+        bne.s   .chars
+        move.w  MSG_DROW(a5),d0         ; clearing
+        mulu    #640,d0
+        lea     TEXTBUF,a0
+        add.l   d0,a0
+        move.w  #(640*TEXT_CLR_ROWS/4)-1,d0
+.c:     clr.l   (a0)+
+        dbra    d0,.c
+        addq.w  #TEXT_CLR_ROWS,MSG_DROW(a5)
+        cmp.w   #20,MSG_DROW(a5)
+        blt.s   .r
+        tst.w   MSG_PRI(a5)
+        beq.s   .done
+        moveq   #4,d1                   ; line 1 at row 1
+        moveq   #1,d2
+        bsr     text_start
+        move.w  #2,MSG_DPH(a5)
+        rts
+.chars: moveq   #TEXT_PER_FRAME-1,d7
+.ch:    move.w  MSG_DI(a5),d0
+        lea     MSG_SCR(a5),a1
+        moveq   #0,d3
+        move.b  0(a1,d0.w),d3
+        beq.s   .eol
+        addq.w  #1,MSG_DI(a5)
+        move.w  d3,d0
+        move.w  MSG_DX(a5),d1
+        move.w  MSG_DTOP(a5),d2
+        move.w  #KFONT_RELIEF,d3
+        moveq   #1,d4                   ; relief pass (+1,+1)
+        bsr     text_glyph
+        move.w  #KFONT_FACE,d3
+        moveq   #0,d4                   ; face pass
+        bsr     text_glyph
+        addq.w  #FONT_ADV,MSG_DX(a5)
+        dbra    d7,.ch
+        rts
+.eol:   cmp.w   #2,MSG_DPH(a5)
+        bne.s   .done
+        moveq   #8,d1                   ; line 2 at row 11
+        moveq   #11,d2
+        bsr     text_start
+        move.w  #3,MSG_DPH(a5)
+        rts
+.done:  clr.w   MSG_DPH(a5)
+.r:     rts
+
+; text_start — d1 = msgtab offset of the line (4/8), d2 = top row: expand
+;   the line into MSG_SCR ('#' -> MSG_ARG digits) and centre it
+text_start:
+        move.w  d2,MSG_DTOP(a5)
+        clr.w   MSG_DI(a5)
+        move.w  d1,-(sp)
+        move.w  MSG_ID(a5),d0
+        bsr     msg_entry
+        move.w  (sp)+,d1
+        move.l  0(a0,d1.w),a1
+        lea     MSG_SCR(a5),a2
+        moveq   #0,d0
+.cp:    move.b  (a1)+,d1
+        beq.s   .cpd
+        cmp.b   #'#',d1
+        bne.s   .cpc
+        move.w  MSG_ARG(a5),d4          ; up to 3 digits, no leading zeros
+        moveq   #0,d5                   ; digits written
+        moveq   #100,d6                 ; (moveq: divu reads all 32 bits)
+.dg:    moveq   #0,d1
+        move.w  d4,d1
+        divu    d6,d1                   ; d1.w = digit, high = rest
+        tst.w   d5
+        bne.s   .dw
+        tst.w   d1
+        bne.s   .dw
+        cmp.w   #1,d6
+        bne.s   .dz
+.dw:    add.b   #'0',d1
+        move.b  d1,(a2)+
+        addq.w  #1,d0
+        moveq   #1,d5
+.dz:    swap    d1
+        move.w  d1,d4
+        divu    #10,d6
+        bne.s   .dg
+        bra.s   .cp
+.cpc:   move.b  d1,(a2)+
+        addq.w  #1,d0
+        bra.s   .cp
+.cpd:   clr.b   (a2)
+        mulu    #FONT_ADV,d0
+        move.w  #320,d1
+        sub.w   d0,d1
+        asr.w   #1,d1
+        move.w  d1,MSG_DX(a5)
+        rts
+
+; text_glyph — d0 = byte, d1 = x, d2 = row, d3 = colour, d4 = offset
+text_glyph:
+        movem.l d0-d2/d5-d7/a1,-(sp)
+        lea     font_ascii,a1
+        move.b  0(a1,d0.w),d0
+        cmp.b   #$FF,d0
+        beq.s   .r                      ; no glyph (space)
+        and.w   #$FF,d0
+        mulu    #7,d0
+        lea     font_glyphs,a1
+        add.w   d0,a1
+        add.w   d4,d1
+        add.w   d4,d2
+        moveq   #6,d7                   ; 7 rows
+.row:   move.b  (a1)+,d5
+        move.w  d2,d6
+        mulu    #640,d6
+        add.w   d1,d6
+        add.w   d1,d6                   ; byte offset of (x,row)
+        lea     TEXTBUF,a0
+        add.l   d6,a0
+        moveq   #4,d6                   ; bit 4 = leftmost column
+.col:   btst    d6,d5
+        beq.s   .nx
+        move.w  d3,(a0)
+.nx:    addq.l  #2,a0
+        dbra    d6,.col
+        addq.w  #1,d2
+        dbra    d7,.row
+.r:     movem.l (sp)+,d0-d2/d5-d7/a1
+        rts
+        .endif
 
 ; ============================================================
 ; TABLES
@@ -3006,70 +3628,31 @@ ctrcat:
 closetab:
         dc.w    300, 210, 150
 ; HUD: tier offset, second tier offset (0 = none), colour
-hudcats:
-        dc.w    T_DOOR,0,$F8FF                  ; doors  - orange
-        dc.w    T_LEVER,0,$EAE7                 ; levers - gold
-        dc.w    T_RUSH,T_WAIT,$2BDD             ; pace   - cyan
-        dc.w    T_BRACE,T_WATCH,$E2DD           ; guards - red
-        dc.w    T_TRAP,0,$53C9                  ; traps  - purple
-        dc.w    T_CHEST,0,$D6BF                 ; chests - copper
+hudcats:                                        ; tier, tier2 (max taken), lit, dim
+        dc.w    T_DOOR,0,HUDC_DOORS_LIT,HUDC_DOORS_DIM
+        dc.w    T_LEVER,0,HUDC_LEVERS_LIT,HUDC_LEVERS_DIM
+        dc.w    T_RUSH,T_WAIT,HUDC_PACE_LIT,HUDC_PACE_DIM
+        dc.w    T_BRACE,T_WATCH,HUDC_GUARDS_LIT,HUDC_GUARDS_DIM
+        dc.w    T_TRAP,0,HUDC_TRAPS_LIT,HUDC_TRAPS_DIM
+        dc.w    T_CHEST,0,HUDC_CHESTS_LIT,HUDC_CHESTS_DIM
+        .include "hud_icons.inc"        ; Kimi's hud_icons.s via tools/mkfont.py
 enimg:
         dc.l    PIXBASE+(img_skull-pix_start), PIXBASE+(img_guard-pix_start), PIXBASE+(img_heavy-pix_start)
         dc.l    PIXBASE+(img_watcher-pix_start), PIXBASE+(img_wraith-pix_start)
         dc.l    PIXBASE+(img_hound-pix_start)
 
-; castle voice: message id -> text (canon lines from original/index.html).
-; Drawing waits for a font object; tests and the debugger read VOICE_ID.
-voicetab:
-        dc.l    vt_none, vt_gateshut, vt_bricked, vt_jammed, vt_gateopen
-        dc.l    vt_dud, vt_alarm, vt_slam, vt_gift, vt_shard
-        dc.l    vt_empty, vt_traprun, vt_greedrun, vt_ceiling, vt_heavy
-        dc.l    vt_hound, vt_goleft, vt_goright, vt_lever, vt_rush
-        dc.l    vt_wait, vt_brace, vt_watch, vt_traps, vt_greed
-        dc.l    vt_exitmoved, vt_guardkill, vt_arrow, vt_spikes, vt_leverkill
-        dc.l    vt_chestkill, vt_crushed, vt_blade, vt_escaped, vt_noleave
-        dc.l    vt_longladder
-vt_none:        dc.b    0
-vt_gateshut:    dc.b    "THE GATE IS SHUT. FIND A LEVER.",0
-vt_bricked:     dc.b    "BRICKED UP. THE CASTLE CLOSED THIS WAY.",0
-vt_jammed:      dc.b    "IT IS JAMMED.",0
-vt_gateopen:    dc.b    "THE GATE IS ALREADY OPEN.",0
-vt_dud:         dc.b    "IT TURNS. NOTHING HAPPENS. TRY THE OTHER ONE.",0
-vt_alarm:       dc.b    "THE GATE OPENS. THE GUARD HEARD IT.",0
-vt_slam:        dc.b    "THE GATE SLAMS SHUT. THE CASTLE WILL NOT WAIT.",0
-vt_gift:        dc.b    "A MEMORY SHARD, LEFT FOR YOU.",0
-vt_shard:       dc.b    "A MEMORY SHARD.",0
-vt_empty:       dc.b    "EMPTY.",0
-vt_traprun:     dc.b    "...YOUR HAND. RUN.",0
-vt_greedrun:    dc.b    "...GREEDY HANDS. RUN.",0
-vt_ceiling:     dc.b    "...THE CEILING REMEMBERS YOU WAITING.",0
-vt_heavy:       dc.b    "THE HEAVY BRACES. AGAIN!",0
-vt_hound:       dc.b    "THE HOUND WILL NOT BE PUSHED.",0
-vt_goleft:      dc.b    "...YOU ALWAYS GO LEFT.",0
-vt_goright:     dc.b    "...YOU ALWAYS GO RIGHT.",0
-vt_lever:       dc.b    "...IT KNOWS WHICH LEVER YOU TRUST.",0
-vt_rush:        dc.b    "...YOU NEVER STOP TO LOOK.",0
-vt_wait:        dc.b    "...YOU LIKE TO WAIT.",0
-vt_brace:       dc.b    "...THE GUARDS HAVE FELT YOUR HANDS.",0
-vt_watch:       dc.b    "...THE GUARDS KNOW YOU SLIP PAST.",0
-vt_traps:       dc.b    "...THE SPIKES GREW FOR YOU.",0
-vt_greed:       dc.b    "...IT SAW YOU OPEN EVERY BOX.",0
-vt_exitmoved:   dc.b    "...THE WAY OUT HAS MOVED.",0
-vt_guardkill:   dc.b    "A GUARD CAUGHT YOU.",0
-vt_arrow:       dc.b    "AN ARROW.",0
-vt_spikes:      dc.b    "SPIKES.",0
-vt_leverkill:   dc.b    "THE LEVER YOU TRUSTED WAS A TRAP.",0
-vt_chestkill:   dc.b    "THE CHEST WAS A TRAP.",0
-vt_crushed:     dc.b    "THE CEILING CAME DOWN.",0
-vt_blade:       dc.b    "THE BLADE KEPT ITS RHYTHM.",0
-vt_escaped:     dc.b    "YOU ESCAPED. THE CASTLE WILL REMEMBER HOW.",0
-vt_noleave:     dc.b    "...IT WILL NOT LET YOU LEAVE SO EASILY.",0
-vt_longladder:  dc.b    "...THE OTHER WAY GOES HIGHER.",0
-        .even
+; castle voice: msgtab + strings generated by tools/mkmsg.py from Kimi's V6
+; package (MSG_*) plus gameplay-lane lines (MSGX_*).
+        .include "messages.inc"
 
 ; ============================================================
 ; ART (generated by tools/mkart.py)
 ; ============================================================
         .include "castle_art.inc"
+        .if ^^defined TEXT_ENABLE
+        .data
+        .include "font.inc"             ; generated by tools/mkfont.py from Kimi's font_data.s
+        .text
+        .endif
 
         .end    start

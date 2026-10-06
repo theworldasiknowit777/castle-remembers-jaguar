@@ -35,3 +35,7 @@ desktop.ini
 __pycache__/
 *.pyc
 *.prn
+
+# Gate 7 castle-voice text band test build (TEXT=1, Bob Checkpoint B review only)
+jaguar-toolchain/gate7_castle/gate7_castle_text.*
+jaguar-toolchain/gate7_castle/*.prn

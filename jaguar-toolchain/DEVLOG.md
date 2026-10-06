@@ -949,3 +949,69 @@ The campaign now opens chests at random.
 - Campaign: seed 7 and seed 11 each 14 escapes, 1 death, 0 softlocks.
 - Soak: 20,000 frames, no invariant violations; logic finishes at blank+72 halflines median, max 358 of 525.
 - COFF guard: OK.
+
+### Gate 7 V6: castle voice + six-category HUD row
+
+Built on Kimi's frozen V6 package:
+- `ea56c3b`: font
+- `8beafe7`: messages + table
+- `b1701f1`: HUD row
+
+Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generate `msg_ids.inc`, `messages.inc`, `font*.inc` and `hud_*.inc` (committed, so the build never needs her branch).
+
+**Message system (default build, state only):**
+- **Ids:** Kimi's 64 `MSG_*` verbatim, plus 23 `MSGX_*` gameplay-lane lines (canon hint/death text her package doesn't carry).
+- **Priority:**
+  - 5 death / escape / rebuild
+  - 4 observation / whisper
+  - 3 floor title
+  - 2 gameplay warning
+  - 1 interaction prompt
+- **Queue:** 6 slots. Warnings and above wait their turn; prompts are re-asserted every frame and dropped when refused.
+- **Observations:** canon `describeObservation` (`pick_observation`). Deaths go by cause; escapes go by the top tier in canon category order.
+- **Run start:** "…IT HAS WATCHED YOU # TIMES." (not on the first run), then the floor-1 whisper.
+- **Floors:** title on first visit per run. Whispers are Kimi's `W_*` (door side, gift/gone door, lever trust/here, rush/wait, brace/watch, trap, chest, exit moved/guarded).
+- **Prompts:** open, pull, shove, climb, down, sealed, exit (`prompt_update`).
+
+**HUD row (default build, existing object + buffer):**
+- `HUDBUF` was reshaped from 320×6 to 160×12 at x 80, halfline 480 (Kimi's band y 224+).
+- Six blocks of 8×8 icon + three 3×3 pips. Lit/dim colours come from her palette; chests are greed green.
+- On a tier gain at rebuild, the newest pip rings `HUD_FLASH` for 30 frames.
+- Floors and shards sit on a strip underneath.
+- Read-only on gameplay state.
+
+**Text band (`-dTEXT_ENABLE`, Bob Checkpoint B):**
+- One more OP object (`NOBJ` 19), with `TEXTBUF` at `$01A000` (320×20 CRY16).
+- Drawn incrementally: 4 rows cleared or 3 glyphs per frame, never in a HUD-redraw frame. A message types in over about ⅓ s.
+- Centred, `#` becomes `MSG_ARG`, relief at (+1,+1).
+- Real VJ: titles, prompt, shard warning, death / rebuild / observation / whisper lines, pip update and continued play all seen at 60 FPS.
+- See `docs/bob/gate7-v6-checkpoint-b.md`.
+
+**Bugs found by the new tests:**
+- The flash ring was drawn one row low (a register reused for the y coordinate).
+- The `OBSERVED` screen consumed the guard line's floor `#`.
+- `move.w #100,d6` left garbage high bits for `divu`.
+- Warnings were dropped under titles.
+- A one-shot full-band redraw cost ~3 frames of CPU.
+
+**New scenarios:**
+- `msg_width`, `msg_observations`, `msg_rebuild_sequence`, `msg_priority`, `msg_events`, `msg_digits`
+- `msg_text_render` (pixel-exact against a Python reference)
+- `hud_states` (every category × tier + flash, pixel-exact)
+- `msg_no_gameplay_effect` (default vs text build vs HUD-every-frame; settled state identical)
+
+**Regression (V6):**
+- 31/31 scenarios.
+- Campaign (seed 7): 14 escapes, 1 death, 0 softlocks, run for run identical to wave 2.
+- Soak (20,000 frames, no invariant violations):
+  - default: logic done at blank+74 / p99 87 / max 463 of 525 halflines
+  - text build: 78 / 168 / 466
+  - same runs, deaths and final tiers as wave 2
+- COFF guard: OK.
+- Real VJ: both builds, evidence in `gate7_castle/v6_evidence/`.
+
+**Notes for Kimi (no revision requested in this pass):**
+- `hud_icons.s` equate names contain a space (`HUD_DOORS   _LIT`). The generator tolerates it.
+- The table's floor-title priority (4) sits above whispers. The production hierarchy puts titles below observations; `msgtab` follows production.
+- Action responses (gate shut, empty, …) are `MSGX_*` warnings until her package carries them.
+- `img_ladder` is still 16×216 against the 16×244 slot (placeholder kept).
