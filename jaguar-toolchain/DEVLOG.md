@@ -1035,7 +1035,7 @@ Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generat
 
 | Slot | Kimi file | Size |
 |---|---|---|
-| `img_skull` | `sentinel_skull.s` | 16×16 |
+| `img_skull` | `sentinel_skull.s` (superseded in wave 2 by `img_skull.s`) | 16×16 |
 | `img_guard` | `img_guard.s` | 16×24 |
 | `img_heavy` | `img_heavy.s` | 16×24 |
 | `img_watcher` | `img_watcher.s` | 16×24 |
@@ -1063,3 +1063,57 @@ Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generat
   - death, rebuild, whispers
   - no corruption afterwards
 - **Showcase builds:** skull + guard, heavy + watcher, wraith + guard; transparency clean; no garbage pixels; on the floor line. A shoved guard reads as the stun flicker next to the open door.
+
+### Gate 7 V7 wave 2: Kimi's runtime corrections + trap and prop art
+
+**Corrections from `b00d520`:**
+- `img_skull.s`: steel palette and red eyes, replacing the green `$CE7B` body and black `$F001` eyes. It supersedes `sentinel_skull.s`, which is removed.
+- `img_guard.s`, `img_heavy.s`, `img_watcher.s`: grounded on the floor line.
+- `img_watcher_l.s`: the left-facing Watcher.
+
+**Watcher facing (integrated):**
+- The archer AI already sets `E_DIR` toward the hero every frame, and its arrows fly that way. The enemy draw now swaps `OB_DATA` to `img_watcher_l` when a Watcher's `E_DIR` is negative.
+- This is the existing data-pointer mechanism: no new object, `NOBJ`, LINK, buffer or gameplay change. Art +768 B.
+
+**Traps and props integrated in their existing slots:**
+
+| Slot | Kimi file | Size |
+|---|---|---|
+| `img_spike16` / `img_spike24` | same names | 16×8 / 24×8 |
+| `img_flame` (eruption) | `img_flame.s` | 64×16 |
+| `img_block` (falling masonry) | `falling_block.s` | 16×16 |
+| `img_blade` (swinging blade) | `swinging_blade.s` | 16×16 |
+| `img_door_closed` / `img_door_open` / `img_door_brick` | same names | 8×40 |
+| `img_gate` (portcullis) | `img_gate.s` | 16×32 |
+| `img_lever_idle` / `img_lever_tell` / `img_lever_pulled` / `img_lever_sprung` | same names | 8×12 |
+| `img_exit` | `img_exit.s` | 32×48 |
+| `img_arrow_l` / `img_arrow_r` | same names | 8×2 |
+
+- `mkart.py` `KIMI_VENDORED` checks every file against its runtime slot, and the build stops on any mismatch.
+- **Art region:** `$010000`–`$019540` (38,208 B), 2,752 B below `TEXTBUF`.
+- **No gameplay change.** The source diff is the Watcher pointer swap plus the test-only `SHOWCASE` hooks (seeds, start floor). Trap timing, damage, gates, levers, doors, memory, AI and physics are untouched.
+
+**Not integrated (art/runtime mismatches and no-slot assets):**
+- **Ladder.** Kimi's `img_ladder.s` is 16×216. The runtime ladder is 16×244: the up-ladder draws 200 rows, up + hole 242, the hole stub 34. A 16×244 ladder (and a gold variant, the long ladder) is required; traversal was not shortened.
+- **`flame_hazard.s` (16×16):** there is no runtime slot. The eruption is the 64×16 `img_flame`.
+- **Hound, chests, shard, decals, backdrops:** outside this wave.
+
+**Presentation notes:**
+- **The masonry hangs at halfline 60, inside the castle-message band.** VJ shows a whisper drawn over the hanging slab. Moving it would change the fall (gameplay); it's for a later layout pass.
+- **Arrows pass through a closed door.** This is unchanged gameplay; it is only visible because of the showcase placement.
+
+**Showcase test builds** (`-dSHOWCASE`; never shipped):
+- `SHOW_C1/V1`, `SHOW_C2/V2`, `SHOW_PC/P` seed memory as `seed()` does; `SHOW_FLOOR` starts the run on a floor; `SHOW_A/B` place enemy types.
+- These put masonry (F4), the blade (F3), the eruption (a trapped F1 chest), the bricked door (F3), the exit (F5) and the Watcher in front of the camera.
+
+**VJ (60 FPS)**, evidence `gate7_castle/v7_evidence/w2_*`:
+- **Spikes:** raised spikes and the slot plates.
+- **Eruption:** the ember warning, then the full flame.
+- **Masonry:** hanging, falling, hit, landed.
+- **Blade:** clear of the ladders and doors.
+- **Doors:** closed, open, bricked, and the open gift door.
+- **Portcullis:** over the centre ladder, and raised after the lever.
+- **Levers:** idle, then pulled.
+- **Exit arch:** reads as the goal.
+- **Ladder:** placeholder, the climb is aligned.
+- **Watcher:** faces left, with left-flying arrows readable.

@@ -469,27 +469,49 @@ KIMI_SLOTS = {
 }
 SPRITES = os.path.join(os.path.dirname(ROOT), "docs", "visual", "sprites")
 
-# V7 wave 1 (enemies): Kimi's frozen enemy art, vendored verbatim in
-# jaguar-toolchain/kimi_sprites/ so the build never needs her branch. These
-# are required: a missing or wrong-sized file stops the build.
+# V7: Kimi's frozen art, vendored verbatim in jaguar-toolchain/kimi_sprites/
+# so the build never needs her branch (see its README for source commits).
+# Every entry is required and must be exactly its runtime size: a missing or
+# wrong-sized file stops the build. slot -> (file, width, height)
 VENDORED = os.path.join(ROOT, "kimi_sprites")
-KIMI_ENEMIES = {
-    "skull": "sentinel_skull.s",
-    "guard": "img_guard.s",
-    "heavy": "img_heavy.s",
-    "watcher": "img_watcher.s",
-    "wraith": "img_wraith.s",
+KIMI_VENDORED = {
+    # wave 1 enemies (+ b00d520 runtime corrections)
+    "skull": ("img_skull.s", 16, 16),
+    "guard": ("img_guard.s", 16, 24),
+    "heavy": ("img_heavy.s", 16, 24),
+    "watcher": ("img_watcher.s", 16, 24),       # right-facing
+    "watcher_l": ("img_watcher_l.s", 16, 24),   # left-facing (Watcher aims left)
+    "wraith": ("img_wraith.s", 16, 24),
+    # wave 2 traps + props
+    "spike16": ("img_spike16.s", 16, 8),
+    "spike24": ("img_spike24.s", 24, 8),
+    "flame": ("img_flame.s", 64, 16),
+    "block": ("falling_block.s", 16, 16),
+    "blade": ("swinging_blade.s", 16, 16),
+    "door_closed": ("img_door_closed.s", 8, 40),
+    "door_open": ("img_door_open.s", 8, 40),
+    "door_brick": ("img_door_brick.s", 8, 40),
+    "gate": ("img_gate.s", 16, 32),
+    "lever_idle": ("img_lever_idle.s", 8, 12),
+    "lever_tell": ("img_lever_tell.s", 8, 12),
+    "lever_pulled": ("img_lever_pulled.s", 8, 12),
+    "lever_sprung": ("img_lever_sprung.s", 8, 12),
+    "exit": ("img_exit.s", 32, 48),
+    "arrow_l": ("img_arrow_l.s", 8, 2),
+    "arrow_r": ("img_arrow_r.s", 8, 2),
 }
-ENEMY_SIZE = {"skull": (16, 16), "guard": (16, 24), "heavy": (16, 24), "watcher": (16, 24), "wraith": (16, 24)}
+VENDORED_ONLY = ("watcher_l",)                  # no placeholder: emitted after the rest
 
 
-def kimi_enemies():
+def kimi_vendored():
     found = {}
-    for slot, name in KIMI_ENEMIES.items():
-        w, h = ENEMY_SIZE[slot]
+    for slot, (name, w, h) in KIMI_VENDORED.items():
+        if slot in IMAGES and (len(IMAGES[slot][0]), len(IMAGES[slot])) != (w, h):
+            raise SystemExit("mkart: runtime slot img_%s is %dx%d, contract says %dx%d"
+                             % (slot, len(IMAGES[slot][0]), len(IMAGES[slot]), w, h))
         got = kimi_fragment(os.path.join(VENDORED, name), slot, w, h)
         if not got:
-            raise SystemExit("mkart: Kimi enemy art %s does not fit img_%s (%dx%d)" % (name, slot, w, h))
+            raise SystemExit("mkart: Kimi art %s does not fit img_%s (%dx%d)" % (name, slot, w, h))
         found[slot] = got
     return found
 
@@ -543,18 +565,18 @@ def emit():
     o.append("        .phrase")
     o.append("pix_start:")
     o.append("; ---- Bob's authentic art (verbatim from gate6_castle.s) ----")
-    enemies = kimi_enemies()
+    vendored = kimi_vendored()
     for lbl, name, w, h in (("floor_pixels", "img_floor", 320, 8), ("enemy_pixels", "img_skull", 16, 16),
                             ("hero_pixels", "img_hero", 16, 24)):
         if name == "img_skull":                     # Kimi's Sentinel Skull replaces Bob's
-            o.append("%s:\t\t\t\t; %dx%d (Kimi sentinel_skull.s)" % (name, w, h))
-            o.extend(enemies["skull"])
+            o.append("%s:\t\t\t\t; %dx%d (Kimi img_skull.s)" % (name, w, h))
+            o.extend(vendored["skull"])
             continue
         o.append("%s:\t\t\t\t; %dx%d" % (name, w, h))
         o.append(bob_block(src, lbl))
     o.append("; ---- placeholder art (Kimi to replace; keep sizes or tell Claude) ----")
     kimi = kimi_art(IMAGES)
-    kimi.update({k: v for k, v in enemies.items() if k in IMAGES})
+    kimi.update({k: v for k, v in vendored.items() if k in IMAGES})
     for name, rows in IMAGES.items():
         o.append("img_%s:\t\t\t\t; %dx%d%s" % (name, len(rows[0]), len(rows), " (Kimi)" if name in kimi else ""))
         if name in kimi:
@@ -564,6 +586,10 @@ def emit():
             words = ["$%04X" % PALETTE[c] for c in r]
             for i in range(0, len(words), 8):
                 o.append("        dc.w    " + ",".join(words[i:i + 8]))
+    for name in VENDORED_ONLY:
+        fname, w, h = KIMI_VENDORED[name]
+        o.append("img_%s:\t\t\t\t; %dx%d (Kimi %s)" % (name, w, h, fname))
+        o.extend(vendored[name])
     o.append("pix_end:")
     o.append("")
     out_dir = os.path.join(ROOT, "gate7_castle")

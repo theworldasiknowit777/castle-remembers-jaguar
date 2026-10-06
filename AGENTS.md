@@ -166,7 +166,7 @@ jagsim harness and `vj_drive.ps1` all run it.
 - **Controls:** Z/C walk · S jump / climb up · X climb down / ACT · L ACT (open door, pull lever, shove guard).
 - **Design + verification:** `jaguar-toolchain/DEVLOG.md` § Gate 7.
 - **V6 castle voice + HUD row:** Kimi's `MSG_*` ids, priority queue and canon observations, plus the six-category icon/pip HUD and the castle-voice text band, all in the normal build. Bob passed Checkpoint B on `fed2955` (O_TEXT, `NOBJ` 19, `TEXTBUF` `$01A000`): `docs/bob/gate7-v6-checkpoint-b.md`.
-- **V7 wave 1 (enemy art):** Kimi's skull, guard, heavy, watcher and wraith art is in the existing enemy slots (`jaguar-toolchain/kimi_sprites/`, imported by `mkart.py`). Only art data changed: the code is byte-identical to `3e1fc36`.
+- **V7 visual integration (waves 1–2):** Kimi's enemy, trap and prop art is in the existing slots (`jaguar-toolchain/kimi_sprites/`, imported and size-checked by `mkart.py`). The only code change is the Stone Watcher's facing (an `OB_DATA` swap to `img_watcher_l` when it aims left), plus `-dSHOWCASE` test hooks, which are assembled out of the normal build. Ladder art is pending a 16×244 asset.
 - **Low-level changes needing Bob's sign-off:** `docs/bob/gate7-lowlevel-review.md`
   (VC field-bit mask — fixes 30 Hz flicker also present in Gate 6; shadow list; runtime
   phrase builder; XPOS origin 0; new memory map).

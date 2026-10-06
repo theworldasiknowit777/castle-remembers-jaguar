@@ -383,6 +383,22 @@ start:
         dbra    d0,.art
 
         bsr     init_objects
+        .if ^^defined SHOWCASE
+        ; ---- V7 art showcase TEST build only: seed the castle's memory so the
+        ;      first plan already has the adaptation to look at (as the playtest
+        ;      bot's seed() does). SHOW_Cn = counter offset, SHOW_Vn = value x100,
+        ;      SHOW_PC = 2*category, SHOW_P = pressure.
+        .if ^^defined SHOW_C1
+        move.w  #SHOW_V1,M_BASE+SHOW_C1(a5)
+        .endif
+        .if ^^defined SHOW_C2
+        move.w  #SHOW_V2,M_BASE+SHOW_C2(a5)
+        .endif
+        .if ^^defined SHOW_PC
+        move.w  #SHOW_P,P_BASE+SHOW_PC(a5)
+        .endif
+        move.w  #1,RUNS(a5)
+        .endif
         bsr     build_plan
         bsr     new_run
         bsr     set_objects
@@ -2095,6 +2111,10 @@ new_run:
         move.w  #1,FACING(a5)
         moveq   #0,d0
         bsr     enter_floor
+        .if ^^defined SHOW_FLOOR
+        moveq   #SHOW_FLOOR,d0          ; V7 showcase TEST build: start on this floor
+        bsr     enter_floor
+        .endif
         tst.w   RUNS(a5)
         beq.s   .qr
         move.w  RUNS(a5),d0             ; canon: "...it has watched you N times."
@@ -2888,7 +2908,7 @@ place:
         moveq   #C_GUARD,d7
         bsr     set_enemy
 .qr:     move.w  #1,HUDDIRTY(a5)
-        .if ^^defined SHOWCASE
+        .if ^^defined SHOW_A
         ; ---- V7 art showcase TEST build only (-dSHOWCASE -dSHOW_A=t -dSHOW_B=t):
         ;      F1's two idle enemy slots show types SHOW_A (left corridor) and
         ;      SHOW_B (right corridor) so every enemy's art can be seen in VJ
@@ -3194,6 +3214,12 @@ set_objects:
         lsl.w   #2,d0
         lea     enimg,a2
         move.l  0(a2,d0.w),OB_DATA(a1)
+        cmp.w   #T_WATCHER,E_TYPE(a0)   ; the Watcher faces where it aims (E_DIR,
+        bne.s   .ewf                    ;  set toward the hero by its AI): left art
+        tst.w   E_DIR(a0)
+        bpl.s   .ewf
+        move.l  #PIXBASE+(img_watcher_l-pix_start),OB_DATA(a1)
+.ewf:
         move.w  E_TYPE(a0),d1
         add.w   d1,d1
         lea     enrows,a2

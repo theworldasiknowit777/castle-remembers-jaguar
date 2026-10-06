@@ -32,32 +32,32 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 | Image | Size (px) | States / notes | Placement |
 |---|---|---|---|
 | `img_floor` | 320×8 | floor slab, opaque (Bob's) | y = floor |
-| `img_ladder` | **16×244** (wave 2; was 16×216) | one tall strip. The game shows the top 200 lines (up-ladder), 34 lines (hole below the floor), or 242 lines (a ladder that passes through the floor) | x = 6 / 152 / 298 |
+| `img_ladder` | **16×244** (wave 2; was 16×216) | **Still a placeholder: Kimi's asset is 16×216.** One tall strip. The game shows the top 200 lines (up-ladder), 34 lines (hole below the floor), or 242 lines (a ladder that passes through the floor) | x = 6 / 152 / 298 |
 | `img_ladder_gold` | 16×244 | **new**: the canon gold long ladder (door tier 2, avoided side, runs F1 to F3) | same x |
-| `img_door_closed` | 8×40 | wall (blocks walking) | x = 94 / 218 (tight: 75 / 237) |
-| `img_door_open` | 8×40 | open frame | same |
-| `img_door_brick` | 8×40 | bricked by the castle (cannot open) | same |
-| `img_gate` | 16×32 | portcullis; drawn down over the centre ladder, or raised 48 rows when open | x = 152 |
-| `img_lever_idle` | 8×12 | gold knob | x = 80 / 232 |
-| `img_lever_tell` | 8×12 | **trapped lever**: same lever, wrong-coloured knob (copper). Must stay subtle but learnable | same |
-| `img_lever_pulled` | 8×12 | handle down | same |
-| `img_lever_sprung` | 8×12 | dud/trap after use: broken | same |
-| `img_spike16`, `img_spike24` | 16×8, 24×8 | raised. **Bottom 2 rows are also drawn alone as the retracted state** (keep them a "slot" plate) | various |
-| `img_exit` | 32×48 | exit arch, bright: the goal | x = 277 (or 11 when moved left) |
-| `img_flame` | 64×16 | eruption. **Bottom 2 rows alone flash as the 0.55 s warning** (keep them embers) | ±32 px around a lever |
-| `img_skull` | 16×16 | Sentinel Skull — **Kimi `sentinel_skull.s` integrated (V7 wave 1)** | patrols |
+| `img_door_closed` | 8×40 | wall (blocks walking) — **Kimi art integrated (V7 wave 2)** | x = 94 / 218 (tight: 75 / 237) |
+| `img_door_open` | 8×40 | open frame — **Kimi art integrated (V7 wave 2)** | same |
+| `img_door_brick` | 8×40 | bricked by the castle (cannot open) — **Kimi art integrated (V7 wave 2)** | same |
+| `img_gate` | 16×32 | portcullis; drawn down over the centre ladder, or raised 48 rows when open — **Kimi art integrated (V7 wave 2)** | x = 152 |
+| `img_lever_idle` | 8×12 | gold knob — **Kimi art integrated (V7 wave 2)** | x = 80 / 232 |
+| `img_lever_tell` | 8×12 | **trapped lever**: same lever, wrong-coloured knob (copper). Must stay subtle but learnable — **Kimi art integrated (V7 wave 2)** | same |
+| `img_lever_pulled` | 8×12 | handle down — **Kimi art integrated (V7 wave 2)** | same |
+| `img_lever_sprung` | 8×12 | dud/trap after use: broken — **Kimi art integrated (V7 wave 2)** | same |
+| `img_spike16`, `img_spike24` | 16×8, 24×8 | raised. **Bottom 2 rows are also drawn alone as the retracted state** (keep them a "slot" plate) — **Kimi art integrated (V7 wave 2)** | various |
+| `img_exit` | 32×48 | exit arch, bright: the goal — **Kimi art integrated (V7 wave 2)** | x = 277 (or 11 when moved left) |
+| `img_flame` | 64×16 | eruption. **Bottom 2 rows alone flash as the 0.55 s warning** (keep them embers) — **Kimi art integrated (V7 wave 2)** | ±32 px around a lever |
+| `img_skull` | 16×16 | Sentinel Skull — **Kimi `img_skull.s` integrated (V7, b00d520 steel palette)** | patrols |
 | `img_guard` | 16×24 | Fallen Guard — **Kimi art integrated (V7 wave 1)** | patrols / chases |
 | `img_heavy` | 16×24 | Fallen Guard, armoured (needs two shoves): must read as tougher — **Kimi art integrated (V7 wave 1)** | |
-| `img_watcher` | 16×24 | Stone Watcher, static archer statue — **Kimi art integrated (V7 wave 1)**; the runtime draws enemies unmirrored, so it does not turn | |
+| `img_watcher` | 16×24 | Stone Watcher, static archer statue — **Kimi art integrated (V7)**; faces where it aims: `img_watcher` (right) / `img_watcher_l` (left), swapped by `E_DIR` | |
 | `img_wraith` | 16×24 | Judgment Wraith, F5 pursuer — **Kimi art integrated (V7 wave 1)** | |
-| `img_arrow_r`, `img_arrow_l` | 8×2 | arrow, both directions (no hardware flip used) | knee height |
+| `img_arrow_r`, `img_arrow_l` | 8×2 | arrow, both directions (no hardware flip used) — **Kimi art integrated (V7 wave 2)** | knee height |
 | `img_hero` | 16×24 | Bob's authentic hero (single frame) | |
 | `img_chest_closed` | 16×12 | **new**: real chest | F1 180 · F2 261 · F3 123 · F4 266 |
 | `img_chest_trap` | 16×12 | **new**: trapped chest. Canon tell: **red clasp** (`$E2DD`); otherwise identical to closed | same |
 | `img_chest_open` | 16×12 | **new**: opened / empty | same |
 | `img_shard` | 8×8 | **new**: memory shard (chests, F3 gift); floats at halfline 340 | F3 x 32 / 280 |
-| `img_block` | 16×16 | **new**: falling masonry. Hangs at halfline 60, shakes ±2 px when cracking, falls, lies as rubble. Your `falling_block.s` drops in | F4 x 112 · F2 x 172 |
-| `img_blade` | 16×16 | **new**: swinging blade, drawn at the swing position (no separate chain). Your `swinging_blade.s` drops in | F3, around x 188 |
+| `img_block` | 16×16 | **new**: falling masonry. Hangs at halfline 60, shakes ±2 px when cracking, falls, lies as rubble. Your `falling_block.s` — **Kimi art integrated (V7 wave 2)** | F4 x 112 · F2 x 172 |
+| `img_blade` | 16×16 | **new**: swinging blade, drawn at the swing position (no separate chain). Your `swinging_blade.s` — **Kimi art integrated (V7 wave 2)** | F3, around x 188 |
 | `img_hound` | 16×16 | **new**: Castle Hound. Your `castle_hound.s` drops in | F2/F4 patrol |
 
 **Fragment import (wave 2).**
