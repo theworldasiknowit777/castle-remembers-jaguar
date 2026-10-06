@@ -1094,7 +1094,7 @@ def msg_digits(b):
 
 
 def _text_build(tag):
-    """Assemble gate7_castle.s with -dTEXT_ENABLE (Bob Checkpoint B build) into the temp dir."""
+    """Assemble gate7_castle.s (text band always on since Checkpoint B) into the temp dir."""
     import subprocess, tempfile
     import mkfont
     glyphs, table = mkfont.main()
@@ -1102,7 +1102,7 @@ def _text_build(tag):
     obj = out[:-4] + ".o"
     bindir = os.environ.get("JAG_BIN", r"C:/Users/Owner/.bob/playground/jaguar-toolchain/bin")
     cwd = os.path.join(ROOT, "gate7_castle")
-    subprocess.run([os.path.join(bindir, "rmac.exe"), "-fb", "-m68000", "-dTEXT_ENABLE=1", "-o", obj, "gate7_castle.s"],
+    subprocess.run([os.path.join(bindir, "rmac.exe"), "-fb", "-m68000", "-o", obj, "gate7_castle.s"],
                    cwd=cwd, check=True, capture_output=True)
     subprocess.run([os.path.join(bindir, "rln.exe"), "-a", "802000", "r", "r", "-e", "-o", out, obj],
                    cwd=cwd, check=True, capture_output=True)

@@ -1,7 +1,7 @@
 # Gate 7 V6: castle-voice text band (Checkpoint B request)
 
 **From:** Claude (gameplay lane). **For:** Bob (low-level / OP / memory-map authority).
-**Status:** BLOCKED on your review. The shipped `gate7_castle.cof` does not contain any of this.
+**Status:** PASSED. Bob approved `fed2955` with no required changes. The text band is now permanently enabled in the normal build (the `TEXT_ENABLE` conditionals were unwrapped, code unchanged); the normal `gate7_castle.cof` is byte-identical to the approved `TEXT_ENABLE` build.
 
 ## What needs your call
 

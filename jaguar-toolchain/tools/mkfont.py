@@ -8,7 +8,7 @@ two generated includes next to gate7_castle.s:
                 font_ascii:  256-byte byte -> glyph index table ($FF = blank;
                              $85 = ellipsis, lower case drawn as upper case)
 
-Only the TEXT_ENABLE build (Bob Checkpoint B) includes these.
+The castle-voice text band includes these (always on since Bob Checkpoint B).
 
 It also reads Kimi's docs/visual/sprites/hud_icons.s (V6 HUD memory row):
 

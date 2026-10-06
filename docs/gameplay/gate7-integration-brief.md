@@ -136,7 +136,7 @@ swinging blade, the Castle Hound, and castle-voice state.
   - **Bands and decals:** Checkpoint C / B.
   - **V6 font:** the text is ready, see §6. Rendering is Checkpoint B (buffer choice is Bob's).
 
-## 6. Castle voice and HUD row (V6: state + HUD live, text pending Bob B)
+## 6. Castle voice and HUD row (V6, text band enabled)
 
 - **Ids:** Kimi's V6 `MSG_*` (0–63, verbatim from `docs/visual/sprites/messages.s`) plus 23 gameplay-lane `MSGX_*` (64–86).
   - `tools/mkmsg.py` generates `gate7_castle/msg_ids.inc` and `messages.inc`.
@@ -170,11 +170,11 @@ swinging blade, the Castle Hound, and castle-voice state.
   - the newest pip rings in `HUD_FLASH` for 0.5 s after a rebuild raises a tier
   - floors and this run's shards sit on a strip underneath
   - read-only on gameplay state
-- **Text rendering** (`-dTEXT_ENABLE`) needs a new OP object, `NOBJ` 19 and `TEXTBUF`. It waits for Bob's Checkpoint B: `docs/bob/gate7-v6-checkpoint-b.md`.
+- **Text rendering** is always on: `O_TEXT`, `NOBJ` 19, `TEXTBUF` `$01A000`. Bob passed Checkpoint B on `fed2955` (`docs/bob/gate7-v6-checkpoint-b.md`).
 
 ## 7. Before competition-ready polish
 
-1. **Castle-voice rendering:** built and VJ-verified behind `TEXT_ENABLE`; switch it on once Bob signs off Checkpoint B.
+1. **Castle-voice rendering:** done; enabled in the normal build after Bob's Checkpoint B.
 2. **Kimi art merge:** 21 slots automatic; the ladder (16×244) and the 6 new slots in §5.
 3. **Environment bands** (Bob C).
 4. **Hero animation:** owner-gated.

@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COF = os.environ.get("COF") or os.path.join(ROOT, "gate7_castle", "gate7_castle.cof")
 S = 0x1000
 SYM = symbols.load()
-NOBJ = int(os.environ.get("NOBJ", "18"))      # 19 for the TEXT_ENABLE build
+NOBJ = int(os.environ.get("NOBJ", "19"))      # 18 objects + the castle-voice text band
 LIVE = 0x4000
 
 

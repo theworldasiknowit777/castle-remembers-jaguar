@@ -1015,3 +1015,16 @@ Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generat
 - The table's floor-title priority (4) sits above whispers. The production hierarchy puts titles below observations; `msgtab` follows production.
 - Action responses (gate shut, empty, …) are `MSGX_*` warnings until her package carries them.
 - `img_ladder` is still 16×216 against the 16×244 slot (placeholder kept).
+
+### Gate 7 V6 lock: text band enabled (Bob Checkpoint B passed)
+
+- Bob reviewed `fed2955` and approved the text-object architecture with no required changes.
+- The four `TEXT_ENABLE` conditionals are unwrapped (bodies unchanged), so the normal build always has `O_TEXT`, `NOBJ` 19 and `TEXTBUF` `$01A000`. `TEXT=1` is gone from `build_gate7.sh`; the soak expects 19 objects.
+- The normal `gate7_castle.cof` (`e607e17`) is byte-identical to the approved `TEXT_ENABLE` build of `fed2955`.
+- **Checks on the exact normal build:**
+  - COFF guard OK
+  - V6 tests 10/10
+  - gameplay scenarios 20/20
+  - campaign 14/15 escapes, 0 softlocks
+  - soak 20,000 frames, no invariant violations, max 466 of 525 halflines
+- **Real VJ (59.9–60 FPS):** F1/F2 titles, "L - OPEN", shard, death, OBSERVED/RECONSTRUCTING, floor-2 observation, both whispers, door and pace pips after the rebuild, continued play. Shots in `gate7_castle/v6_evidence/`.
