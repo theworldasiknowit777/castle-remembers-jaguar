@@ -32,7 +32,8 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 | Image | Size (px) | States / notes | Placement |
 |---|---|---|---|
 | `img_floor` | 320×8 | floor slab, opaque (Bob's) | y = floor |
-| `img_ladder` | 16×216 | one tall strip; the game shows the top 200 lines (up-ladder) or 34 lines (hole below the floor) | x = 6 / 152 / 298 |
+| `img_ladder` | **16×244** (wave 2; was 16×216) | one tall strip. The game shows the top 200 lines (up-ladder), 34 lines (hole below the floor), or 242 lines (a ladder that passes through the floor) | x = 6 / 152 / 298 |
+| `img_ladder_gold` | 16×244 | **new**: the canon gold long ladder (door tier 2, avoided side, runs F1 to F3) | same x |
 | `img_door_closed` | 8×40 | wall (blocks walking) | x = 94 / 218 (tight: 75 / 237) |
 | `img_door_open` | 8×40 | open frame | same |
 | `img_door_brick` | 8×40 | bricked by the castle (cannot open) | same |
@@ -51,6 +52,18 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 | `img_wraith` | 16×24 | Judgment Wraith, F5 pursuer | |
 | `img_arrow_r`, `img_arrow_l` | 8×2 | arrow, both directions (no hardware flip used) | knee height |
 | `img_hero` | 16×24 | Bob's authentic hero (single frame) | |
+| `img_chest_closed` | 16×12 | **new**: real chest | F1 180 · F2 261 · F3 123 · F4 266 |
+| `img_chest_trap` | 16×12 | **new**: trapped chest. Canon tell: **red clasp** (`$E2DD`); otherwise identical to closed | same |
+| `img_chest_open` | 16×12 | **new**: opened / empty | same |
+| `img_shard` | 8×8 | **new**: memory shard (chests, F3 gift); floats at halfline 340 | F3 x 32 / 280 |
+| `img_block` | 16×16 | **new**: falling masonry. Hangs at halfline 60, shakes ±2 px when cracking, falls, lies as rubble. Your `falling_block.s` drops in | F4 x 112 · F2 x 172 |
+| `img_blade` | 16×16 | **new**: swinging blade, drawn at the swing position (no separate chain). Your `swinging_blade.s` drops in | F3, around x 188 |
+| `img_hound` | 16×16 | **new**: Castle Hound. Your `castle_hound.s` drops in | F2/F4 patrol |
+
+**Fragment import (wave 2).**
+- `tools/mkart.py` uses `docs/visual/sprites/img_<slot>.s` (or `falling_block` / `swinging_blade` / `castle_hound`) whenever the file exists and **exactly** matches the slot size. `dc.w` and `dc.l` lists both work.
+- Dry run against `kimi/visual-refinement` @ `ea56c3b`: **21 of 22 drop in**. Only `img_ladder` (16×216 vs 16×244) is skipped.
+- None of the new props needs a new OP object. Each is drawn in an object slot its floor leaves idle, so this is not Bob Checkpoint B.
 
 ## Gameplay-readability requirements
 

@@ -12,7 +12,7 @@
 | Gate 4 — Vertical Slice | ✅ PASS | Jump + enemy + collision/reset — full gameplay loop |
 | Gate 5 — Adaptive Memory | ✅ PASS | Side-bias tracking; enemy adapts spawn + speed on respawn |
 | Gate 6 — Three-Floor Castle | ⏳ BUILT — awaiting runtime verification | Three floors, two enemies, ladder transitions, WIN state |
-| Gate 7 — Five-Floor Castle | ✅ PLAYABLE (branch `claude/gameplay-refinement`) — awaiting Bob low-level audit | Five floors, doors/levers/gates, 5 enemy types, spikes/eruption, full castle memory; 13/13 playtests, VJ-verified |
+| Gate 7 — Five-Floor Castle | ✅ PLAYABLE (branch `claude/gameplay-refinement`) — awaiting Bob low-level audit | Five floors, doors/levers/gates, chests, long ladder, 6 enemy types (incl. Castle Hound), spikes/eruption/masonry/blade, six-category castle memory, castle-voice state; scripted suite + campaign + soak green, VJ-verified |
 
 ## Binary safety (read before touching any .cof / .o / .abs)
 

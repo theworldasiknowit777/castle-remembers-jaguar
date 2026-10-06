@@ -317,14 +317,128 @@ IIWWWWWW
 """)
 
 
-def ladder(lines=216):
+# ---------------------------------------------------------------- chests 16x12
+img("chest_closed", """
+................
+..wwwwwwwwwwww..
+.wWWWWWWWWWWWWw.
+.wWWWWWWWWWWWWw.
+.iiiiiiGGiiiiii.
+.wWWWWWGGWWWWWw.
+.wWWWWWWWWWWWWw.
+.wWWWWWWWWWWWWw.
+.iiiiiiiiiiiiii.
+.wWWWWWWWWWWWWw.
+.wwwwwwwwwwwwww.
+................
+""")
+img("chest_trap", """
+................
+..wwwwwwwwwwww..
+.wWWWWWWWWWWWWw.
+.wWWWWWWWWWWWWw.
+.iiiiiiRRiiiiii.
+.wWWWWWRRWWWWWw.
+.wWWWWWWWWWWWWw.
+.wWWWWWWWWWWWWw.
+.iiiiiiiiiiiiii.
+.wWWWWWWWWWWWWw.
+.wwwwwwwwwwwwww.
+................
+""")
+img("chest_open", """
+..wwwwwwwwwwww..
+.wWWWWWWWWWWWWw.
+.wwwwwwwwwwwwww.
+................
+.iiiiiiiiiiiiii.
+.wkkkkkkkkkkkkw.
+.wkkkkkkkkkkkkw.
+.wWWWWWWWWWWWWw.
+.iiiiiiiiiiiiii.
+.wWWWWWWWWWWWWw.
+.wwwwwwwwwwwwww.
+................
+""")
+# ---------------------------------------------------------------- memory shard 8x8
+img("shard", """
+...HH...
+..HCCH..
+.HCCCCH.
+HCCHCCCH
+HCCCCCCH
+.HCCCCH.
+..HCCH..
+...HH...
+""")
+# ---------------------------------------------------------------- falling masonry 16x16
+img("block", """
+.......ii.......
+.......Ii.......
+ssssssssssssssss
+sSSSSSSSsSSSSSSs
+sSSSSSSSsSSSSSSs
+sSSSSSSSsSSSSSSs
+ssssssssssssssss
+sSSSsSSSSSSSsSSs
+sSSSsSSSSkSSsSSs
+sSSSsSSSkSSSsSSs
+ssssssssssssssss
+sSSSSSSkSsSSSSSs
+sSSSSSSSSsSSSSSs
+.ssssssssssssss.
+..s..s..s..s..s.
+................
+""")
+# ---------------------------------------------------------------- swinging blade 16x16
+img("blade", """
+.......ii.......
+.......ii.......
+.......ii.......
+.......ii.......
+.......ii.......
+.......ii.......
+......iIIi......
+.....iIIIIi.....
+...HIIIIIIIIH...
+..HIIIIIIIIIIH..
+.HIIIIIIIIIIIIH.
+.HII........IIH.
+.HI..........IH.
+.H............H.
+................
+................
+""")
+# ---------------------------------------------------------------- castle hound 16x16
+img("hound", """
+................
+................
+................
+................
+..........ss....
+.........sSSs...
+.........sSRSs..
+sssssssssSSSSSS.
+sSSSSSSSSSSSs...
+.sSSSSSSSSSSs...
+..sSSSSSSSSSs...
+..sSs....sSs....
+..sS.....sS.....
+..sS.....sS.....
+..ss.....ss.....
+................
+""")
+
+def ladder(lines=244, rail="W", rung="w"):
     rows = []
     for y in range(lines):
-        rows.append(".WW..........WW." if y % 6 else ".WWwwwwwwwwwwWW.")
+        rows.append((".%s%s..........%s%s." % (rail, rail, rail, rail)) if y % 6
+                    else (".%s%s%s%s." % (rail, rail, rung * 10, rail * 2)))
     return rows
 
 
 IMAGES["ladder"] = ladder()
+IMAGES["ladder_gold"] = ladder(rail="G", rung="Y")      # the long ladder (canon: drawn gold)
 
 
 # ---------------------------------------------------------------- Bob's verbatim art
@@ -341,6 +455,56 @@ def bob_block(src, label):
     while out and (not out[-1].strip() or out[-1].strip().startswith(";")):
         out.pop()
     return "\n".join(out)
+
+
+# Kimi's fragments (docs/visual/sprites/*.s on kimi/visual-refinement) replace a
+# placeholder automatically when present AND exactly the slot's size:
+#   img_<slot>.s      -> img_<slot>        (her same-size runtime drop-ins)
+#   <design name>.s   -> the slot below    (her named design assets)
+# Accepts dc.w (one CRY word per pixel) or dc.l (two per long) lists.
+KIMI_SLOTS = {
+    "falling_block": "block",
+    "swinging_blade": "blade",
+    "castle_hound": "hound",
+}
+SPRITES = os.path.join(os.path.dirname(ROOT), "docs", "visual", "sprites")
+
+
+def kimi_fragment(path, slot, w, h):
+    txt = open(path, encoding="utf-8", errors="replace").read()
+    m = re.search(r"(\d+)\s*[x×]\s*(\d+)", txt.splitlines()[0] if txt else "")
+    if m and (int(m.group(1)), int(m.group(2))) != (w, h):
+        print("  kimi %s skipped: header %s, slot img_%s is %dx%d" % (os.path.basename(path), m.group(0), slot, w, h))
+        return None
+    words = []
+    for ln in txt.splitlines():
+        code = ln.split(";")[0]
+        if re.search(r"dc\.l\s", code):
+            for v in re.findall(r"\$([0-9A-Fa-f]{8})", code):
+                words += [v[:4], v[4:]]
+        elif re.search(r"dc\.w\s", code):
+            words += re.findall(r"\$([0-9A-Fa-f]{4})(?![0-9A-Fa-f])", code)
+    if len(words) != w * h:
+        print("  kimi %s skipped: %d pixels, slot img_%s needs %dx%d" % (os.path.basename(path), len(words), slot, w, h))
+        return None
+    print("  using kimi %s for img_%s" % (os.path.basename(path), slot))
+    return ["        dc.w    " + ",".join("$" + x.upper() for x in words[i:i + 8]) for i in range(0, len(words), 8)]
+
+
+def kimi_art(images):
+    found = {}
+    if not os.path.isdir(SPRITES):
+        return found
+    for slot, rows in images.items():
+        names = ["img_%s.s" % slot] + ["%s.s" % k for k, v in KIMI_SLOTS.items() if v == slot]
+        for n in names:
+            path = os.path.join(SPRITES, n)
+            if os.path.exists(path):
+                got = kimi_fragment(path, slot, len(rows[0]), len(rows))
+                if got:
+                    found[slot] = got
+                    break
+    return found
 
 
 def emit():
@@ -360,8 +524,12 @@ def emit():
         o.append("%s:\t\t\t\t; %dx%d" % (name, w, h))
         o.append(bob_block(src, lbl))
     o.append("; ---- placeholder art (Kimi to replace; keep sizes or tell Claude) ----")
+    kimi = kimi_art(IMAGES)
     for name, rows in IMAGES.items():
-        o.append("img_%s:\t\t\t\t; %dx%d" % (name, len(rows[0]), len(rows)))
+        o.append("img_%s:\t\t\t\t; %dx%d%s" % (name, len(rows[0]), len(rows), " (Kimi)" if name in kimi else ""))
+        if name in kimi:
+            o.extend(kimi[name])
+            continue
         for r in rows:
             words = ["$%04X" % PALETTE[c] for c in r]
             for i in range(0, len(words), 8):

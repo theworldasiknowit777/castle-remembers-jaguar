@@ -1,142 +1,172 @@
 # Five-Floor Castle — Gameplay Integration Brief
 
-Branch `claude/gameplay-refinement` @ `f4a42ed` (local) · source `jaguar-toolchain/gate7_castle/gate7_castle.s`
+Branch `claude/gameplay-refinement` · source `jaguar-toolchain/gate7_castle/gate7_castle.s`
 Lanes: gameplay = Claude · OP / memory map / phrase safety = Bob · visuals = Kimi.
+Wave 2 adds chests and greed, the long ladder and gift shard, falling masonry, the
+swinging blade, the Castle Hound, and castle-voice state.
 
-## 0. Shared coordinates (everything below uses these)
+## 0. Shared coordinates
 
-- **Screen x = XPOS**, 0..319, left edges. Sprites are 16 px wide unless noted.
-- **Floor surface is halfline 420** on every floor. In VJ this is screen row 194.
-  - Hero is 16×24 and stands with its top at halfline 372.
-  - Rows above the floor, about halfline 40–420, are free wall space for V2 bands.
-- **Ladders** (16 wide) sit at x = **6 (L), 152 (C), 298 (R)**.
-  - An *up-ladder* spans halflines 20→420 and exits through the ceiling.
-  - A *ladder hole* spans 436→504, under the floor slab: the ladder you came up, or the way back down.
-- **Reach:** ACT works within 14 px of an object's centre. Grabbing a ladder needs the hero's centre within 9 px of it.
+- **Horizontal:** screen x = XPOS, 0..319, left edges.
+- **Vertical:**
+  - The floor surface is halfline 420 on every floor (VJ screen row 194).
+  - The hero (16×24) stands with its top at halfline 372.
+- **Ladders** (16 wide) at x = 6 (L), 152 (C), 298 (R):
+  - *Up-ladder*: halflines 20→420, out through the ceiling.
+  - *Hole*: 436→504, under the floor slab.
+  - *Long ladder*: both at once, 20→504, drawn gold.
+- **Reach:**
+  - ACT works within 14 px of an object's centre.
+  - Grabbing a ladder needs the hero's centre within 9 px of it.
+  - A chest is reached at the hero's x = chest x.
 - **Hit boxes:**
-  - Hero body x+4..x+12; feet x+5..x+11.
-  - Enemies x+3..x+13. Their top 6 rows are harmless (skull: top 4 rows).
-  - Spikes hurt from x+3 to x+w−3.
-- **Jump:** peak 72 halflines, airtime 16 frames, 32 px of travel. It clears 16- and 24-wide spikes, the skull, and arrows. It does **not** clear a closed door (40 rows tall).
+  - Hero: body x+4..x+12, feet x+5..x+11.
+  - Enemies: x+3..x+13. The top 6 rows are harmless (skull and hound: top 4 rows).
+  - Spikes: x+3..x+w−3.
+  - Masonry: x+2..x+14.
+  - Blade: x+3..x+13.
+- **Jump:** peak 72 halflines, 16 frames of air, 32 px of travel.
 
 ## 1. Floor-by-floor structure
 
-| Floor | Role (canon) | Entry | Up-route | Fixed contents | Adaptive contents (what the castle adds) |
-|---|---|---|---|---|---|
-| **F1 Gatehouse** | Choice / Observation | start x=152 | L or R ladder, each behind a door | doors L x=94, R x=218 | **door tier 1+:** retracting spikes in the favoured corridor (x=41 / 263). **Tier 2+:** favoured door moves tight (75 / 237). **Tier 3:** corridor Fallen Guard (L 23–57 / R 247–280) |
-| **F2 Gallery** | Lever / Escalation | hole L or R | C ladder, gated | levers x=80 / 232; gate over C; Sentinel Skull patrol 100–204 | **lever:** trusted lever becomes a dud (t2) or trap (t3). **Rush t3:** spikes flank the ladder (114, 190). **Watch t2:** patrol widens to 28–276. **Wait:** gate slams after 5 / 3.5 / 2.5 s |
-| **F3** | Choice / Adaptation | hole C (x=152) | L or R ladder, behind doors | doors 94 / 218; static spikes both corridors (55, 249; 16 wide) | **door t1:** other door left open (gift). **Door t1–2:** corridor guard (L 33–76 / R 228–271). **Door t2:** favoured spikes retract. **Door t3:** favoured door bricked. **Rush t2:** ambush guard at the ladder top (109–195). **Trap t1:** spikes widen to 24 |
-| **F4 Pressure** | Lever / Pressure | hole L or R | C ladder, gated | levers, gate; patrol 47–257 | **lever t1:** trusted lever = trap (eruption). **Lever t3:** other lever = alarm. **Trap t2:** spike at 190 (next to the ladder). **Watch t3:** Stone Watcher at x=52. **Watch t2:** patrol 28–276 |
-| **F5 Judgment** | Judgment / Exit | hole C | exit arch (32×48) at x=277 | Judgment Wraith (always pursues), 180–261 | **rush t2:** Wraith covers the ladder top (138–261). **Wait t3:** whole floor (28–276). **Brace t2:** Wraith armoured. **Trap t3:** spike beside the exit. **Escapes ≥1 + favours RIGHT doors:** exit moves left (x=11). **Escapes ≥2:** Stone Watcher guards the exit |
+| Floor | Role (canon) | Fixed contents | What the castle adds as it learns |
+|---|---|---|---|
+| **F1 Gatehouse** | Choice | Doors L 94 / R 218 hiding ladders L/R. **Chest x=180**, real until greed t3 | **Door t1:** spikes in the favoured corridor (41 / 263). **Door t2:** favoured door tight (75 / 237); the **avoided-side ladder becomes the gold long ladder to F3**. **Door t3:** corridor Fallen Guard. **Greed t3:** chest trapped |
+| **F2 Gallery** | Lever | Levers 80 / 232, gate over the C ladder, patrol 100–204. **Chest x=261** | **Lever:** trusted lever dud (t2) or trap (t3). **Rush t3:** spikes at 114 / 190. **Wait:** gate slams after 5/3.5/2.5 s; **masonry over x=172 at t2**. **Brace t2:** patrol becomes the **Castle Hound**. **Watch t2:** patrol widens. **Greed t2:** chest trapped. **Long ladder** passes through on the avoided side (you can step off here) |
+| **F3** | Choice II | Doors again; fixed spikes at 55 / 249. **Chest x=123** (always real) | **Door t1:** other door open as a gift **with a memory shard floating behind it** (x 280 / 32, hop to take). **Door t1–2:** corridor guard. **Door t2:** favoured spikes retract. **Door t3:** favoured door bricked. **Rush t1:** **swinging blade** between the C hole and the R door (rest x 188). **Rush t2:** ambush at the ladder top. **Trap t1:** spikes widen. The long ladder lands in the avoided-side corridor |
+| **F4 Pressure** | Lever | Levers, gate, patrol 47–257. **Chest x=266** | **Lever:** trusted lever = eruption trap (t1); other lever = alarm (t3). **Wait t1:** **masonry over x=112**. **Brace t3:** patrol becomes a hound. **Watch t3:** Stone Watcher at 52. **Trap t2:** spike at 190. **Greed t1:** chest trapped |
+| **F5 Judgment** | Exit | Exit arch x=277 (32×48); Judgment Wraith 180–261 | **Rush t2:** Wraith covers the ladder top. **Wait t3:** whole floor. **Brace t2:** armoured. **Trap t3:** spike by the exit. **1 escape + favours RIGHT:** exit moves left (x 11). **2 escapes:** Stone Watcher at the exit |
 
-- **Neutral run length:** a clean bot escape takes about 13 s (804 frames). The original's runs were longer; see §5.
-- **Death:** one touch. A red pulse, then the castle merges what it saw, rebuilds, and a new run starts on F1.
-- **Escape:** gold pulse, double-weight memory merge, rebuild.
+**Run length.**
+- A clean neutral escape still takes about 13 s (806 frames).
+- Chests are optional detours: four chests add about 6 s.
+- Adapted castles lengthen runs:
+  - the blade waits on F3;
+  - masonry blocks loitering;
+  - the hound must be jumped.
+- The long ladder is the canon *shortcut*: the reward for using the side you avoid.
 
 ## 2. Enemy and trap roles
 
-| Name | Role | Behaviour summary | Readability need |
+| Name | Memory link | Behaviour | Counter |
 |---|---|---|---|
-| Sentinel Skull | baseline patrol | bounces min↔max; +2/16 px per death (Gate 5 lineage) | low and small, clearly jumpable |
-| Fallen Guard | corridor and gallery pressure | patrols; chases within 81 px when the castle saw you *avoid* guards | humanoid; one shove stuns |
-| Fallen Guard, heavy | "brace" counter | two shoves (the first only staggers for 0.6 s) | must read as tougher than the plain guard |
-| Stone Watcher | ranged defence | static, turns to face you, knee-height arrow every 2.4 s | the arrow must read at 8×2 |
-| Judgment Wraith | F5 final pursuer | always chases; patrol shape and armour adapt | distinct from everything below F5 |
-| Spikes, static | F3 corridor gate-keeping | always up | |
-| Spikes, retracting | adaptive pressure | up 1.0 s (1.3 s for players who wait) of every 1.8–2.0 s | retracted state = bottom 2 rows only |
-| Eruption | trapped-lever punishment | 0.55 s ember warning, then 1.6 s of flame, ±32 px around the lever | the warning must be unmistakable |
-| Gate slam | anti-waiting | an open gate closes after N seconds; pulled levers reset | |
+| Sentinel Skull | baseline | patrol; +2/16 px per death | jump or shove |
+| Fallen Guard | door / pace / watch | patrol; chases within 81 px after "watch" | shove (3 s stun, 1.2 s after "brace") |
+| Fallen Guard, heavy | brace t3 | first shove only staggers (0.6 s) | shove twice |
+| Stone Watcher | watch t3 / 2 escapes | static archer, knee-height arrow every 2.4 s | jump the arrow, or shove it |
+| Judgment Wraith | F5 always | pursues; patrol shape and armour adapt | shove, slip past |
+| **Castle Hound** | **brace t2 (F2), t3 (F4)** | fast patrol (26/16 px, capped below hero speed); sniffs 0.5 s at each end and 0.75 s when the hero arrives on its floor; crouches 10 frames, then lunges ×1.5 at a hero just ahead | **cannot be shoved** ("THE HOUND WILL NOT BE PUSHED."); jump it (16 rows) |
+| Spikes | trap / door / pace | static, or up 1.0 s (1.3 s for waiters) of every 1.8–2.0 s | hop |
+| Eruption | trapped lever / **trapped chest** | 0.55 s ember warning, then 1.6 s of flame ±32 px | run |
+| **Falling masonry** | **wait t1 (F4), t2 (F2)** | stand under the cracked slab 0.75 s: it shakes 0.5 s, then drops; rubble 1.5 s, then it resets | don't loiter under cracks |
+| **Swinging blade** | **rush t1 (F3)** | fixed 2 s pendulum (±30 px). Deadly only in the low middle of the swing, about 23 frames per pass, leaving a 36-frame safe window | cross on the back-swing |
+| Gate slam | wait | the gate closes N s after opening; pulled levers reset | move |
 
-- **Shove (ACT facing a guard within 28 px):** stun 3 s (1.2 s after the castle learns "brace"), push 10 px.
-- **Alarm:** wakes the floor's guards to chase at ×1.6 within 190 px. A guard pinned under the hero stays down, and stunned guards rise after at most 1/3 s. These fairness rules go beyond the original.
+**Greed (canon chest rule).**
+- Greedy means opened ≥ 1.5 and opened > 2 × skipped, where skipped counts chests left shut on floors you stood on.
+- The tiers turn F4's chest, then F2's, then F1's into traps; the red clasp is the tell.
+- F3's chest is always real.
+- A real chest gives a memory shard. Shards show as white pips on the HUD.
 
-## 3. Interaction zones (per floor; all must stay unobstructed by art)
+## 3. Interaction zones (keep art clear of these)
 
 | Zone | Where | Trigger |
 |---|---|---|
-| Door | 8×40 at the door x, top at halfline 340 | ACT within 14 px of door centre (x+4). Closed door = solid wall for the hero only |
-| Lever | 8×12 at x 80 / 232, top at halfline 396 | ACT within 14 px of lever centre (x+4) |
-| Ladder foot | ladder x ±9 (centre to centre), standing on the floor | S climbs (blocked while the gate is shut) |
-| Ladder hole | ladder x ±9, standing on the floor | X climbs down |
-| Exit | arch centre ±12 px, standing on the floor | win |
-| Eruption | lever centre ±32, feet within 38 halflines of the floor | death while active |
-| Safe spots | inside a ladder hole (hero top below halfline 412) and on any ladder | enemies, spikes, arrows and eruptions can't reach you |
+| Door | 8×40, top at halfline 340 | ACT within 14 px of x+4. A closed door is a wall |
+| Lever | 8×12 at 80 / 232, top 396 | ACT within 14 px of x+4 |
+| **Chest** | 16×12 at 180 / 261 / 123 / 266, top 396 | ACT within 14 px of x+8 |
+| Ladder foot / hole | ladder x ±9 | S climbs up (blocked by a shut gate: "THE GATE IS SHUT."); X climbs down |
+| **Gift shard** | 8×8 at (280 or 32, halfline 340) | touch while hopping |
+| Exit | arch centre ±12 | win |
+| Safe havens | on any ladder, or inside a ladder hole | no enemy, spike, arrow, eruption, masonry or blade can kill you there |
 
-**ACT priority:** shove a guard ahead > pull a lever > open a door. A player near a guard may shove when they meant to pull, so keep guard patrols off the exact lever positions when placing art.
+- **ACT priority:** shove > chest > lever > door. Chest and lever reach zones never overlap.
+- **Placement rule kept:** no hazard's lethal zone overlaps a ladder grab, door, lever or chest reach zone.
+  - The blade's deadly column (hero x 160–200) sits between the C hole and the R door.
+  - The masonry columns (F4 x 112, F2 x 172) sit between the levers and the C ladder.
 
-## 4. Where Kimi's art plugs in
+## 4. Object-slot use: no new OP objects
 
-- Art is packed by `tools/mkart.py` into `gate7_castle/castle_art.inc`, then copied to DRAM at boot.
-- **Slot table:** `docs/kimi/gate7-art-spec.md`.
-- **Adding or resizing any object or buffer needs Bob's sign-off** (memory map and OP bandwidth). `build_list` itself handles any object count.
+**Every wave-2 prop is drawn in a slot that floor leaves idle.** Consequences:
 
-| Kimi asset (kimi/visual-refinement) | Game slot | Fit |
+- `NOBJ` stays at 18.
+- The LINK chain is unchanged.
+- No new phrase constants; everything goes through the audited runtime builder.
+
+| Floor type | Idle slots | Wave-2 use |
 |---|---|---|
-| V0 Gatehouse floor, Sentinel Skull | `img_floor`, `img_skull` (pulled from `gate6_castle.s`) | ✅ drops in on merge, same sizes |
-| `fallen_guard`, `stone_watcher`, `judgment_wraith` (16×16) | `img_guard` / `img_heavy` / `img_watcher` / `img_wraith` (**16×24**) | ⚠ **size decision needed**, see below |
-| `spikes` (16×16) | `img_spike16` / `img_spike24` (16×8, 24×8) | ⚠ the game uses an 8-row spike whose bottom 2 rows are the retracted state. Use rows 8–15 of Kimi's sheet, or tell Claude to raise spike height |
-| `flame_hazard` (16×16) | `img_flame` (64×16) | ✅ tile it 4× across. The bottom 2 rows double as the warning |
-| `falling_block`, `swinging_blade` (16×16) | none yet | gameplay proposal in §5 |
-| `castle_hound` (16×16) | none yet | gameplay proposal in §5 |
-| V2 environment bands (walls, arches, banners, doors, gates, F5 sunset) | new background objects *before* `O_LAD0` in the list. Doors and gates reuse their existing slots | **Bob:** OP bandwidth and buffer placement. **Claude:** nothing to change in gameplay if bands stay behind the play objects |
+| F1 / F3 (choice) | gate, lever L, lever R, exit | chest → gate slot; blade (F3) → lever L slot; gift shard (F3) → exit slot |
+| F2 / F4 (lever) | door L, door R, exit | chest → door L slot; masonry → door R slot |
+| F5 | doors, gate, levers | nothing yet |
 
-**Size decision (Claude's recommendation): adopt Kimi's 16×16 for all enemies.**
+**What Bob should confirm (no checkpoint is triggered, listed for the final audit):**
+- **Art region grows** to 37,184 B. It is still packed and phrase-aligned at `$010000`–`$019140`.
+- **State block grows** to 784 B, still within `$001000`.
+- **One slot now shows different images at different sizes per floor.** For example, the gate slot draws a 16×12 chest on choice floors. Size and data come from the same per-frame object records.
 
-- Gameplay will move to a per-type height table: `enemy_touch` and the Y position computation in `set_objects`.
-- 16-row humanoids are jumpable like the skull, which better matches the original (guards were jumpable there).
-- The heavy then needs its own 16×16 variant, e.g. shield or darker plate.
-- This is a gameplay-only change. Claude makes it once Kimi confirms the size.
+## 5. Kimi's art: integration status
 
-**Palette warning for Kimi (with Bob as tie-breaker).** The plan uses `$F001` as the red "warning groove / stud / clasp". Under VJ's own CRY tables (`cry2rgb.h`, mirrored in `tools/jagsim.py`):
+`tools/mkart.py` imports Kimi's fragments automatically on merge. A fragment is used only when it exactly matches the slot size; otherwise the generator prints why.
 
-| Word | Renders as |
-|---|---|
-| `$F001` | black (intensity byte 01) |
-| `$3601` | black |
-| `$E011` | near-black |
-| `$CE7B` | olive |
+**Accepted formats:**
+- `docs/visual/sprites/img_<slot>.s`, or her named designs.
+- `dc.w` or `dc.l` lists.
 
-- Red warning tones that read: `$E2DD` (red), `$E26E` (dark red).
-- Copper trap tell: `$D6BF`.
-- `tools/jagsim.py: rgb_to_cry()` picks words from RGB.
+**Dry run against `kimi/visual-refinement` @ `ea56c3b` (her fragments copied in, not committed):**
 
-## 5. Missing before competition-ready polish
+- **21 of 22 drop in:**
+  - doors ×3, gate, levers ×4
+  - spike16, spike24, exit, flame
+  - guard, heavy, watcher, wraith
+  - arrows ×2
+  - `falling_block` → `img_block`, `swinging_blade` → `img_blade`, `castle_hound` → `img_hound`
+- **Needs Kimi:**
+  - `img_ladder` must now be **16×244**. The long ladder runs through the floor (halflines 20→504).
+  - New slots:
 
-**Gameplay (Claude, no low-level impact unless noted)**
+| Slot | Size | Purpose |
+|---|---|---|
+| `img_ladder_gold` | 16×244 | canon gold long ladder |
+| `img_chest_closed` | 16×12 | real chest |
+| `img_chest_trap` | 16×12 | trapped chest; **red clasp tell, `$E2DD`** |
+| `img_chest_open` | 16×12 | opened chest |
+| `img_shard` | 8×8 | memory shard |
 
-1. **Chests and the greed category** (canon: one per floor F1–F4; trapped when greedy; red-clasp tell). Needs a chest art slot.
-2. **Pacing / floor density.** Runs are short. Canon additions that lengthen floors without new mechanics:
-   - the **long ladder** (door tier 2: the avoided-side ladder skips F2);
-   - the **gift shard** behind the open F3 door.
-3. **New trap families (Kimi's sheet), proposed rules:**
-   - *Falling Block*: punishes **waiting**.
-     - A cracked ceiling slab above the lever-floor ladder foot drops 0.5 s after you stand under it for over 1.5 s.
-     - Telegraph: dust or crack flash. Replaces nothing; added at wait tier 2+.
-   - *Swinging Blade*: punishes **rushing**.
-     - A pendulum across one F3 corridor on a fixed 2 s rhythm; pass on the back-swing.
-     - Added at rush tier 1+ instead of the speed-up only.
-   - *Flame*: already the eruption; Kimi's tile is a drop-in.
-4. **Castle Hound** (2/4 patrol, low runner): proposed as the "watch" tier-1 replacement for the skull on F2/F4.
-   - Fast while patrolling, slow to turn; it can be jumped but not shoved.
-   - It gives the avoid-habit its own counter.
-5. **Castle voice.** Whispers, floor titles, the title screen and the "castle observed you" rebuild screen are currently only a background pulse.
-   - Needs a small font bitmap object (Kimi art + **Bob** OP slot); the text and triggers are Claude's.
-6. **Hero animation:** walk, climb and hurt frames (Kimi, owner approval; hero protected).
-7. **Audio:** none. The DSP is untouched; **Bob** only.
-8. **Memory survives power-off:** the original saves to localStorage; here memory lasts until reset. EEPROM is a **Bob** decision.
+- **Not yet linked:**
+  - **Bands and decals:** Checkpoint C / B.
+  - **V6 font:** the text is ready, see §6. Rendering is Checkpoint B (buffer choice is Bob's).
 
-**Bob must review before merge** (details: `docs/bob/gate7-lowlevel-review.md`)
+## 6. Castle voice (state live, rendering pending)
 
-- The VC field-bit mask, which fixes VJ's every-other-frame blank. The bug is also present in Gate 6 / `main`.
-- Shadow list copied in blank; runtime phrase builder; XPOS origin 0.
-- Gate 7 memory map: state `$1000`, objects `$2000`, lists `$4000` / `$4800`, HUD `$F000`, art `$10000+`.
-- Left verbatim for Bob's decision: `btst #4,$F14002` tests the high byte (Bob's `videoinit.inc` tests `$F14003`).
-- Any V2 band or new trap or enemy buffer: allocation is Bob's.
+- `say(id)` sets `VOICE_ID` and `VOICE_T` (180 frames).
+- `voicetab` holds the canon text (`original/index.html`), uppercase, ASCII, and within Kimi's font glyph set.
+- **Hooks fire for:**
+  - gate shut, bricked, jammed, already open, dud, alarm, gate slam
+  - shard, gift, empty, trap warnings (lever / greedy hands), ceiling warning, heavy braces, hound
+  - every death cause
+  - escape
+  - each floor's whisper on first entry to an adapted floor (`FVOICE` per floor, set by `build_plan`)
+- **Rendering needs** one CPU text buffer (or the HUD buffer) plus Kimi's `font_data.s`. That's Checkpoint B, so this branch doesn't draw text yet.
 
-**Non-negotiable rules for any new content**
+## 7. Before competition-ready polish
 
-- Only the favoured side or trusted lever is ever hardened. The other door and other lever always work, so no castle is unwinnable.
-- Every lethal element has a readable telegraph or a fixed rhythm.
-- Ladder holes and ladders stay safe havens.
-- No new hazard may overlap a ladder foot, lever or door reach zone (§3).
-- `tools/test_gate7.py campaign` must stay green, with no softlocks, after every wave.
+1. **Castle-voice rendering** (Bob B + Kimi font): whispers, title, "castle observed you", end screens.
+2. **Kimi art merge:** 21 slots automatic; the ladder (16×244) and the 6 new slots in §5.
+3. **Environment bands** (Bob C).
+4. **Hero animation:** owner-gated.
+5. **Audio / EEPROM memory:** Bob.
+
+**Deferred low-level items for the final Bob return:**
+- VC field-bit mask.
+- NTSC/PAL CONFIG byte.
+- Final shadow→LIVE validation.
+
+## 8. Regression gates (run after every wave)
+
+`tools/test_gate7.py`:
+- the scripted suite;
+- the `campaign` 15-run softlock hunt, which now also opens chests at random.
+
+`tools/soak_gate7.py`: the 20,000-frame random-input soak.
+
+Real Virtual Jaguar F8 checks via `tools/vj_drive.ps1`.

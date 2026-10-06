@@ -901,3 +901,51 @@ python tools/soak_gate7.py 20000 1 18
 .\bin\rmac.exe -fb -m68000 -o gate7_castle\gate7_castle.o gate7_castle\gate7_castle.s
 .\bin\rln.exe -a 802000 r r -e -o gate7_castle\gate7_castle.cof gate7_castle\gate7_castle.o
 ```
+
+### Gate 7 wave 2: chests, long ladder, masonry, blade, hound, castle voice
+
+All gameplay-side. **No new OP objects:** each new prop is drawn in an object slot its floor leaves idle.
+
+| Prop | Slot |
+|---|---|
+| chest | gate slot on F1/F3, door L slot on F2/F4 |
+| masonry | door R slot |
+| blade | lever L slot |
+| gift shard | exit slot |
+
+`NOBJ` (18), the LINK chain and the phrase builder are unchanged.
+
+| Feature | Canon / design | Memory link |
+|---|---|---|
+| Chests F1–F4 (x 180/261/123/266) | canon: real chest → memory shard; trapped → eruption ("greedy hands"); F3 always real | new category **greed**: opened ≥ 1.5 and > 2× skipped. Tiers trap F4 → F2 → F1. Red-clasp tell |
+| Long ladder | canon: door t2, the avoided side's F1 ladder runs to F3, drawn gold; you may step off at F2 | door |
+| Gift shard | canon: floats behind the F3 gift door; hop to take | door t1 |
+| Falling masonry | Jaguar edition: standing 0.75 s under the cracked slab → 0.5 s shake → drop → rubble 1.5 s → reset | wait t1 (F4), t2 (F2) |
+| Swinging blade | Jaguar edition: fixed 2 s pendulum on F3, deadly only low in the swing (36-frame safe window) | rush t1 |
+| Castle Hound | Jaguar edition: fast patrol, sniff pause at each end and for 0.75 s when you arrive on its floor (no blind spawn), telegraphed lunge ×1.5; jumpable, **cannot be shoved** | brace t2 (F2), t3 (F4) |
+| Castle voice | canon lines in `voicetab`; `VOICE_ID`/`VOICE_T` set by every hint, death, escape, and floor whisper | — |
+
+**Engineering:**
+- The state block is now an `equ` chain (784 B). `tools/symbols.py` evaluates it for the test tools, so offsets never drift.
+- The ladder table moved to RAM (`LADS`, built by the plan; kind bits 1 up / 2 hole / 4 gold). Only gold ladders pass through a floor, and they end at F3 like the canon one.
+- The art region is 37,184 B at `$010000`. `mkart.py` imports Kimi's `docs/visual/sprites` fragments automatically when sizes match.
+
+**New scenarios:**
+- `chest_shard`, `greed_memory`, `trapped_chest`
+- `long_ladder`, `gift_shard`
+- `falling_masonry`, `swinging_blade`, `castle_hound`
+- `voice_hooks`
+
+The campaign now opens chests at random.
+
+**Hound fairness and the bot:**
+- The hound now also sniffs for 0.75 s when the hero arrives on its floor, so a ladder never delivers the hero onto a hound that is already running at them.
+- `jagsim.py` gained `snapshot()`/`restore()`. The bot's hound handling is a look-ahead "careful player": walk on, or wait / step back and then jump, and take the first move that lives, stays on the floor and leaves a safe next 30 frames. At a ladder it waits until a climb is seen to get above the hound's reach.
+- `tools/diag_hound.py` replays a run to its first death and rewinds 10–90 frames to check whether any simple input would have lived. Every hound death in the failing runs was avoidable, so these were bot faults, not unfair spawns.
+- The bot re-pulls a lever when the wait tier slams the gate (the slam resets the lever).
+
+**Regression (wave 2):**
+- 22/22 scenarios.
+- Campaign: seed 7 and seed 11 each 14 escapes, 1 death, 0 softlocks.
+- Soak: 20,000 frames, no invariant violations; logic finishes at blank+72 halflines median, max 358 of 525.
+- COFF guard: OK.

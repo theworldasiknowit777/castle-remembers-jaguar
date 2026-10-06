@@ -17,10 +17,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from jagsim import JagSim, HALFLINES_PER_FRAME  # noqa: E402
+import symbols  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COF = os.path.join(ROOT, "gate7_castle", "gate7_castle.cof")
 S = 0x1000
+SYM = symbols.load()
 NOBJ = 18
 LIVE = 0x4000
 
@@ -84,19 +86,19 @@ def main():
         if not sim.io_w(0x28):
             continue                                   # still booting
         # ---- invariants ------------------------------------------
-        hx, hy, fl, climb, gs = (sim.sw(S + 6), sim.sw(S + 8), sim.sw(S + 14), sim.sw(S + 12), sim.sw(S + 20))
+        hx, hy, fl, climb, gs = (sim.sw(S + SYM["HX"]), sim.sw(S + SYM["HY"]), sim.sw(S + SYM["FLOOR"]), sim.sw(S + SYM["CLIMB"]), sim.sw(S + SYM["GSTATE"]))
         if not (0 <= hx <= 304 and 0 <= hy <= 460 and 0 <= fl <= 4):
             problems.append("frame %d: bad hero state x=%d y=%d floor=%d" % (f, hx, hy, fl))
         if fl in (0, 2) and gs == 0:
             for d in range(2):
-                b = S + 128 + 8 * (d + (2 if fl == 2 else 0))
+                b = S + SYM["DOORS"] + 8 * (d + (2 if fl == 2 else 0))
                 dx, dopen = sim.w(b), sim.w(b + 2)
                 if not dopen and hx + 16 > dx and hx < dx + 8 and hy == 372:
                     problems.append("frame %d: hero inside closed door F%d x=%d door=%d" % (f, fl + 1, hx, dx))
         stop = struct.unpack(">Q", sim.uc.mem_read(LIVE + NOBJ * 16, 8))[0]
         if stop & 7 != 4:
             problems.append("frame %d: object list lost its STOP" % f)
-        runs = sim.w(S + 94)
+        runs = sim.w(S + SYM["RUNS"])
         if runs != last_runs:
             max_run_frames = max(max_run_frames, f - run_start)
             run_start, last_runs = f, runs
@@ -110,12 +112,12 @@ def main():
     n = len(done_at)
     print("soak: %d frames, seed %d, %d instr/halfline" % (n, seed, ipl))
     print("  runs ended: %d (deaths %d, escapes %d); floors reached: %s" % (
-        sim.w(S + 94), sim.w(S + 98), sim.w(S + 96), sorted(x + 1 for x in floors_seen)))
+        sim.w(S + SYM["RUNS"]), sim.w(S + SYM["DEATHS"]), sim.w(S + SYM["WINS"]), sorted(x + 1 for x in floors_seen)))
     print("  longest run: %d frames" % max_run_frames)
     print("  logic finished at blank+N halflines: median %d, p99 %d, max %d (frame is %d halflines)" % (
         done_at[n // 2], done_at[int(n * 0.99)], done_at[-1], HALFLINES_PER_FRAME))
-    tiers = [sim.w(S + o) for o in (100, 102, 104, 106, 108, 110, 112)]
-    print("  final tiers door/lever/rush/wait/brace/watch/trap: %s" % tiers)
+    tiers = [sim.w(S + SYM[k]) for k in ("T_DOOR", "T_LEVER", "T_RUSH", "T_WAIT", "T_BRACE", "T_WATCH", "T_TRAP", "T_CHEST")]
+    print("  final tiers door/lever/rush/wait/brace/watch/trap/chest: %s" % tiers)
     if problems:
         print("  PROBLEMS:")
         for p in problems[:20]:

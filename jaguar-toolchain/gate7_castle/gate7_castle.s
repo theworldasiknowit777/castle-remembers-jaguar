@@ -158,12 +158,59 @@ ERUPT_LIVE      equ     96
 ARCHER_CD       equ     144
 ALARM_FRAMES    equ     240
 
+; ---- wave 2 props (all drawn in object slots a floor leaves idle) --
+GIFT_Y          equ     340             ; gift shard top: a small hop to reach
+FB_TOP          equ     60              ; falling masonry hangs here (halflines)
+FB_LOITER       equ     45              ; frames standing under it before it cracks
+FB_WARN         equ     30              ; frames of shaking before it drops
+FB_RUBBLE       equ     90              ; frames the rubble lies before it resets
+BLADE_REST      equ     188             ; F3 blade rest x (between hole C and door R)
+
+; ---- castle voice message ids (text in voicetab) -------------
+V_GATESHUT      equ     1
+V_BRICKED       equ     2
+V_JAMMED        equ     3
+V_GATEOPEN      equ     4
+V_DUD           equ     5
+V_ALARM         equ     6
+V_SLAM          equ     7
+V_GIFT          equ     8
+V_SHARD         equ     9
+V_EMPTY         equ     10
+V_TRAPRUN       equ     11
+V_GREEDRUN      equ     12
+V_CEILING       equ     13
+V_HEAVY         equ     14
+V_HOUND         equ     15
+V_GOLEFT        equ     16
+V_GORIGHT       equ     17
+V_LEVER         equ     18
+V_RUSH          equ     19
+V_WAIT          equ     20
+V_BRACE         equ     21
+V_WATCH         equ     22
+V_TRAPS         equ     23
+V_GREED         equ     24
+V_EXITMOVED     equ     25
+V_GUARDKILL     equ     26
+V_ARROW         equ     27
+V_SPIKES        equ     28
+V_LEVERKILL     equ     29
+V_CHESTKILL     equ     30
+V_CRUSHED       equ     31
+V_BLADE         equ     32
+V_ESCAPED       equ     33
+V_NOLEAVE       equ     34
+V_LONGLADDER    equ     35
+VOICE_FRAMES    equ     180
+
 ; ---- enemy types --------------------------------------------
 T_SKULL         equ     0               ; Sentinel Skull: patrol baseline (Bob's skull)
 T_GUARD         equ     1               ; Fallen Guard
 T_HEAVY         equ     2               ; Fallen Guard, armoured (two shoves)
 T_WATCHER       equ     3               ; Stone Watcher: static archer
 T_WRAITH        equ     4               ; Judgment Wraith: F5 pursuer
+T_HOUND         equ     5               ; Castle Hound: fast patrol, can't be shoved
 
 ; ---- memory categories --------------------------------------
 C_GUARD         equ     0
@@ -171,6 +218,8 @@ C_DOOR          equ     1
 C_LEVER         equ     2
 C_PACE          equ     3
 C_TRAP          equ     4
+C_CHEST         equ     5
+NCAT            equ     6
 
 ; ---- pad bits (active high in PAD) ---------------------------
 P_LEFT          equ     0
@@ -179,29 +228,9 @@ P_UP            equ     2
 P_DOWN          equ     3
 P_A             equ     4
 
-; ---- state block offsets (a5) --------------------------------
-PAD             equ     0
-PADPREV         equ     2
-PADNEW          equ     4
-HX              equ     6
-HY              equ     8
-HVY             equ     10
-CLIMB           equ     12              ; 0 / 1 up-ladder / 2 ladder hole
-FLOOR           equ     14              ; 0..4
-FACING          equ     16
-GSTATE          equ     20              ; 0 play, 1 dying, 2 escaped
-GTIMER          equ     22
-BGVAL           equ     24
-WHISPER         equ     26
-RUNT            equ     28              ; long, frames this run
-IDLE            equ     32              ; long, idle frames this run
-CAUSE           equ     36
-SEEN            equ     38              ; floors visited this run (bits)
-NOTES           equ     40              ; floors the castle adapted (bits)
-HUDDIRTY        equ     42
-R_BASE          equ     44              ; run counters (10 words)
-M_BASE          equ     64              ; memory counters, x100 (10 words)
-CTR_DOORL       equ     0
+; ---- state block offsets (a5), chained so fields can be added --------
+; Gameplay state only; lives in the $001000 block of Bob's audited map.
+CTR_DOORL       equ     0               ; run/memory counter offsets
 CTR_DOORR       equ     2
 CTR_LEVL        equ     4
 CTR_LEVR        equ     6
@@ -211,43 +240,67 @@ CTR_WAIT        equ     12
 CTR_CONF        equ     14
 CTR_AVOID       equ     16
 CTR_TRAPS       equ     18
-NCTR            equ     10
-P_BASE          equ     84              ; pressure per category 0..3
-RUNS            equ     94
-WINS            equ     96
-DEATHS          equ     98              ; Bob's DEATH_COUNT, now persistent
-T_DOOR          equ     100
-T_LEVER         equ     102
-T_RUSH          equ     104
-T_WAIT          equ     106
-T_BRACE         equ     108
-T_WATCH         equ     110
-T_TRAP          equ     112
-SIDE_DOOR       equ     114             ; -1 left, +1 right, 0 none
-SIDE_LEVER      equ     116
-EXIT_X          equ     118
-SIDE_BIAS       equ     120             ; Bob's Gate 5 signal, per run
-AUTOCLOSE       equ     122
-SPIKE_ON        equ     124
-STUN_T          equ     126
-DOORS           equ     128             ; 4 x 8: F1L F1R F3L F3R
+CTR_CHESTS      equ     20              ; chests opened
+CTR_SKIP        equ     22              ; chests left shut on floors you stood on
+NCTR            equ     12
+PAD             equ     0
+PADPREV         equ     PAD+2
+PADNEW          equ     PADPREV+2
+HX              equ     PADNEW+2
+HY              equ     HX+2
+HVY             equ     HY+2
+CLIMB           equ     HVY+2           ; 0 / 1 up-ladder / 2 ladder hole
+FLOOR           equ     CLIMB+2         ; 0..4
+FACING          equ     FLOOR+2
+GSTATE          equ     FACING+2        ; 0 play, 1 dying, 2 escaped
+GTIMER          equ     GSTATE+2
+BGVAL           equ     GTIMER+2
+WHISPER         equ     BGVAL+2
+RUNT            equ     WHISPER+2       ; long, frames this run
+IDLE            equ     RUNT+4          ; long, idle frames this run
+CAUSE           equ     IDLE+4
+SEEN            equ     CAUSE+2         ; floors visited this run (bits)
+NOTES           equ     SEEN+2          ; floors the castle adapted (bits)
+HUDDIRTY        equ     NOTES+2
+R_BASE          equ     HUDDIRTY+2      ; run counters (NCTR words)
+M_BASE          equ     R_BASE+(NCTR*2) ; memory counters, x100
+P_BASE          equ     M_BASE+(NCTR*2) ; pressure per category 0..3 (must stay < 128)
+RUNS            equ     P_BASE+(NCAT*2)
+WINS            equ     RUNS+2
+DEATHS          equ     WINS+2          ; Bob's DEATH_COUNT, now persistent
+T_DOOR          equ     DEATHS+2        ; tiers ... (cleared together up to SIDE_LEVER)
+T_LEVER         equ     T_DOOR+2
+T_RUSH          equ     T_LEVER+2
+T_WAIT          equ     T_RUSH+2
+T_BRACE         equ     T_WAIT+2
+T_WATCH         equ     T_BRACE+2
+T_TRAP          equ     T_WATCH+2
+T_CHEST         equ     T_TRAP+2
+SIDE_DOOR       equ     T_CHEST+2       ; -1 left, +1 right, 0 none
+SIDE_LEVER      equ     SIDE_DOOR+2
+EXIT_X          equ     SIDE_LEVER+2
+SIDE_BIAS       equ     EXIT_X+2        ; Bob's Gate 5 signal, per run
+AUTOCLOSE       equ     SIDE_BIAS+2
+SPIKE_ON        equ     AUTOCLOSE+2
+STUN_T          equ     SPIKE_ON+2
+DOORS           equ     STUN_T+2        ; 4 x 8: F1L F1R F3L F3R
 D_X             equ     0
 D_OPEN          equ     2
 D_LOCK          equ     4
 D_PASSED        equ     6
-LEVERS          equ     160             ; 4 x 4: F2L F2R F4L F4R
+LEVERS          equ     DOORS+32        ; 4 x 4: F2L F2R F4L F4R
 LV_EFF          equ     0               ; 0 open 1 dud 2 trap 3 alarm
 LV_STATE        equ     2               ; 0 idle 1 pulled 2 sprung
-GATES           equ     176             ; 2 x 4: F2 F4
+GATES           equ     LEVERS+16       ; 2 x 4: F2 F4 (LEVERS..GATES cleared together)
 G_OPEN          equ     0
 G_T             equ     2
-FSPIKE          equ     184             ; 5 floors x 2 x 8
+FSPIKE          equ     GATES+8         ; 5 floors x 2 x 8
 SP_X            equ     0
 SP_W            equ     2               ; 0 none, 16 or 24 px
 SP_PER          equ     4               ; 0 static, else retract period
 SP_ORG          equ     6
-FENEMY          equ     264             ; 5 floors x 2 x 32 (plan)
-ENEMY           equ     584             ; 2 x 32 (current floor, live)
+FENEMY          equ     FSPIKE+80       ; 5 floors x 2 x 32 (plan; adjacent to FSPIKE)
+ENEMY           equ     FENEMY+320      ; 2 x 32 (current floor, live)
 E_TYPE          equ     0               ; -1 none
 E_X             equ     2               ; plan: px; live: px*16
 E_DIR           equ     4
@@ -261,13 +314,29 @@ E_STUN          equ     18
 E_ALARM         equ     20
 E_CNT           equ     22              ; confronted/avoided counted
 E_SIDE          equ     24
-E_SHOOT         equ     26
-AX              equ     648             ; arrow, px*16
-ADIR            equ     650
-AON             equ     652
-EX              equ     654             ; eruption left px
-ET              equ     656             ; eruption timer
-STATE_SIZE      equ     660
+E_SHOOT         equ     26              ; archer cooldown / hound turn pause
+E_LUNGE         equ     28              ; hound: 30..21 crouch (telegraph), 20..1 lunge
+AX              equ     ENEMY+64        ; arrow, px*16
+ADIR            equ     AX+2
+AON             equ     ADIR+2
+EX              equ     AON+2           ; eruption left px
+ET              equ     EX+2            ; eruption timer
+ECAUSE          equ     ET+2            ; eruption's memory category (lever / chest)
+LADS            equ     ECAUSE+2        ; 5 floors x 3 x (x, kind bits) — built by the plan
+CHSTATE         equ     LADS+60         ; chest per floor F1..F4: 0 shut, 1 opened
+CHTRAP          equ     CHSTATE+8       ; chest per floor F1..F4: 1 = trapped
+SHARDS          equ     CHTRAP+8        ; memory shards this run
+GIFT_X          equ     SHARDS+2        ; F3 gift shard x (0 none)
+GIFT_TAKEN      equ     GIFT_X+2
+FBX             equ     GIFT_TAKEN+2    ; falling masonry x per floor (0 none), 5 words
+FB_PH           equ     FBX+10          ; 0 hanging 1 warning 2 falling 3 rubble
+FB_T            equ     FB_PH+2
+FB_Y            equ     FB_T+2
+BLADE_CX        equ     FB_Y+2          ; F3 swinging blade rest x (0 none)
+FVOICE          equ     BLADE_CX+2      ; whisper id per floor (5 words)
+VOICE_ID        equ     FVOICE+10       ; castle voice: current message id (0 none)
+VOICE_T         equ     VOICE_ID+2      ; frames left to show it
+STATE_SIZE      equ     VOICE_T+2
 
 
 ; ============================================================
@@ -501,6 +570,12 @@ read_pad:
 ; ============================================================
 game_frame:
         bsr     read_pad
+        tst.w   VOICE_T(a5)             ; castle voice: message lifetime
+        beq.s   .vq
+        subq.w  #1,VOICE_T(a5)
+        bne.s   .vq
+        clr.w   VOICE_ID(a5)
+.vq:
         move.w  GSTATE(a5),d0
         beq     play_frame
         subq.w  #1,GTIMER(a5)
@@ -547,6 +622,7 @@ play_frame:
         bsr     enemies_update
         bsr     arrow_update
         bsr     hazards_update
+        bsr     props_update
         bsr     exit_check
 
         clr.w   BGVAL(a5)
@@ -557,6 +633,13 @@ play_frame:
         beq.s   .nw
         move.w  #BG_WHISPER,BGVAL(a5)
 .nw:    rts
+
+; say — d0 = castle voice message id. The text is in voicetab; drawing it
+;   waits for a font object (Bob checkpoint B), but the state is live now.
+say:
+        move.w  d0,VOICE_ID(a5)
+        move.w  #VOICE_FRAMES,VOICE_T(a5)
+        rts
 
 ; kill — d0 = memory category of the cause
 kill:
@@ -589,8 +672,13 @@ hero_update:
         bmi.s   .nomount
         bsr     gate_blocks
         tst.w   d0
-        bne.s   .nomount
-        moveq   #1,d0
+        beq.s   .gok
+        btst    #P_UP,PADNEW+1(a5)
+        beq.s   .nomount
+        moveq   #V_GATESHUT,d0
+        bsr     say
+        bra.s   .nomount
+.gok:   moveq   #1,d0
         bra     start_climb
 .tdown: btst    #P_DOWN,PADNEW+1(a5)
         beq.s   .nomount
@@ -679,9 +767,17 @@ climb_update:
         ; on an up-ladder: floor below, next floor above
         cmp.w   #GROUND_Y,d0
         blt.s   .uptop
-        move.w  #GROUND_Y,d0            ; back at the floor
+        btst    #P_DOWN,PAD+1(a5)       ; a long ladder carries on down
+        beq.s   .ufl                    ; through this floor's hole
+        bsr     ladder_here
+        and.w   #6,d6                   ; only a gold (long) ladder passes floors
+        cmp.w   #6,d6
+        bne.s   .ufl
+        move.w  #2,CLIMB(a5)
+        bra     .store
+.ufl:   move.w  #GROUND_Y,d0            ; back at the floor
         btst    #P_UP,PAD+1(a5)
-        bne.s   .store
+        bne     .store
         clr.w   CLIMB(a5)               ; dismount
         bra.s   .store
 .uptop: cmp.w   #FLIP_TOP,d0
@@ -696,7 +792,15 @@ climb_update:
 .hole:  ; in a ladder hole below the floor
         cmp.w   #GROUND_Y,d0
         bgt.s   .holebot
-        move.w  #GROUND_Y,d0
+        btst    #P_UP,PAD+1(a5)         ; a long ladder carries on up
+        beq.s   .hfl                    ; past this floor
+        bsr     ladder_here
+        and.w   #5,d6                   ; only a gold (long) ladder passes floors;
+        cmp.w   #5,d6                   ; it ends at F3 like the canon one
+        bne.s   .hfl
+        move.w  #1,CLIMB(a5)
+        bra.s   .store
+.hfl:   move.w  #GROUND_Y,d0
         btst    #P_DOWN,PAD+1(a5)
         bne.s   .store
         clr.w   CLIMB(a5)
@@ -714,17 +818,18 @@ climb_update:
 .store: move.w  d0,HY(a5)
         bra     idle_acct
 
-; find_ladder — d0 = kind (1 up, 2 hole); out d1 = ladder x or -1
+; find_ladder — d0 = kind bit (1 up, 2 hole); out d1 = ladder x or -1
 find_ladder:
-        lea     ladtab,a0
+        lea     LADS(a5),a0
         move.w  FLOOR(a5),d1
         mulu    #12,d1
         add.w   d1,a0
         move.w  HX(a5),d3
         moveq   #2,d2
 .ql:     move.w  (a0)+,d1
-        cmp.w   (a0)+,d0
-        bne.s   .qn
+        move.w  (a0)+,d4
+        and.w   d0,d4
+        beq.s   .qn
         move.w  d3,d5
         sub.w   d1,d5
         bpl.s   .qp
@@ -734,6 +839,23 @@ find_ladder:
 .qn:     dbra    d2,.ql
         moveq   #-1,d1
 .qf:     rts
+
+; ladder_here — out d6 = kind bits of the ladder at the hero's x (0 none)
+ladder_here:
+        lea     LADS(a5),a0
+        move.w  FLOOR(a5),d6
+        mulu    #12,d6
+        add.w   d6,a0
+        moveq   #2,d5
+.lh:    move.w  (a0)+,d6
+        cmp.w   HX(a5),d6
+        beq.s   .lf
+        addq.l  #2,a0
+        dbra    d5,.lh
+        moveq   #0,d6
+        rts
+.lf:    move.w  (a0),d6
+        rts
 
 ; gate_blocks — d1 = ladder x; d0 = 1 if a shut gate blocks it
 gate_blocks:
@@ -836,10 +958,16 @@ do_act:
         ble.s   .shn
         cmp.w   #28,d0
         bge.s   .shn
-        bra     shove
+        cmp.w   #T_HOUND,E_TYPE(a0)     ; the hound will not be pushed
+        bne     shove
+        moveq   #V_HOUND,d0
+        bsr     say
 .shn:   lea     32(a0),a0
         dbra    d7,.sh
-.lev:   ; levers (F2, F4)
+.lev:   bsr     try_chest               ; chests (F1-F4)
+        tst.w   d0
+        bne     .done
+        ; levers (F2, F4)
         lea     LEVERS(a5),a0
         move.w  FLOOR(a5),d0
         cmp.w   #1,d0
@@ -878,10 +1006,54 @@ do_act:
         rts
 .bricked:
         move.w  #12,WHISPER(a5)         ; brief ember flash: "bricked up"
-        rts
+        moveq   #V_BRICKED,d0
+        bra     say
 .dn:    lea     8(a0),a0
         dbra    d7,.dl
 .done:  rts
+
+; try_chest — ACT at this floor's chest. d0 = 1 if handled.
+;   Real chest: a memory shard. Trapped chest (red clasp): an eruption.
+try_chest:
+        moveq   #0,d0
+        move.w  FLOOR(a5),d1
+        cmp.w   #4,d1
+        bge.s   .tr
+        add.w   d1,d1
+        move.w  d1,d3                   ; d3 = floor*2
+        lea     chestx,a0
+        move.w  0(a0,d1.w),d2           ; d2 = chest x
+        move.w  d2,d1
+        addq.w  #8,d1
+        bsr     near_hero
+        bne.s   .tr
+        lea     CHSTATE(a5),a0
+        tst.w   0(a0,d3.w)
+        beq.s   .open
+        moveq   #V_EMPTY,d0
+        bsr     say
+        moveq   #1,d0
+        rts
+.open:  move.w  #1,0(a0,d3.w)
+        addq.w  #1,R_BASE+CTR_CHESTS(a5)
+        lea     CHTRAP(a5),a0
+        tst.w   0(a0,d3.w)
+        beq.s   .real
+        addq.w  #1,R_BASE+CTR_TRAPS(a5)
+        sub.w   #24,d2                  ; flames centred on the chest
+        move.w  d2,EX(a5)
+        move.w  #ERUPT_WARN+ERUPT_LIVE,ET(a5)
+        move.w  #C_CHEST,ECAUSE(a5)
+        moveq   #V_GREEDRUN,d0
+        bsr     say
+        moveq   #1,d0
+        rts
+.real:  addq.w  #1,SHARDS(a5)
+        move.w  #1,HUDDIRTY(a5)
+        moveq   #V_SHARD,d0
+        bsr     say
+        moveq   #1,d0
+.tr:    rts
 
 ; near_hero — d1 = object centre px; Z set if within REACH of hero centre
 near_hero:
@@ -904,6 +1076,8 @@ shove:
         beq.s   .norm
         subq.w  #1,E_ARM(a0)
         move.w  #36,E_STUN(a0)
+        moveq   #V_HEAVY,d0
+        bsr     say
         moveq   #21,d1
         bra.s   .push
 .norm:  move.w  STUN_T(a5),E_STUN(a0)
@@ -937,10 +1111,15 @@ clamp_ex:
 ; pull_lever — a0 = lever, d6 = 0 left / 1 right
 pull_lever:
         cmp.w   #2,LV_STATE(a0)
-        beq.s   .qr                      ; jammed
-        bsr     gate_ptr
+        bne.s   .nj
+        moveq   #V_JAMMED,d0
+        bra     say
+.nj:    bsr     gate_ptr
         tst.w   G_OPEN(a1)
-        bne.s   .qr                      ; gate already open
+        beq.s   .ng
+        moveq   #V_GATEOPEN,d0
+        bra     say
+.ng:
         addq.w  #1,R_BASE+CTR_PULLS(a5)
         tst.w   d6
         bne.s   .rr
@@ -953,8 +1132,13 @@ pull_lever:
         beq.s   .alarm
         move.w  #2,LV_STATE(a0)         ; dud or trap: sprung for good
         cmp.w   #2,d0
-        bne.s   .qr
-        addq.w  #1,R_BASE+CTR_TRAPS(a5) ; trap: eruption at the lever
+        beq.s   .trap
+        moveq   #V_DUD,d0
+        bra     say
+.trap:  addq.w  #1,R_BASE+CTR_TRAPS(a5) ; trap: eruption at the lever
+        move.w  #C_LEVER,ECAUSE(a5)
+        moveq   #V_TRAPRUN,d0
+        bsr     say
         move.w  #LEVER_LX+4-32,d1
         tst.w   d6
         beq.s   .ex
@@ -962,7 +1146,9 @@ pull_lever:
 .ex:    move.w  d1,EX(a5)
         move.w  #ERUPT_WARN+ERUPT_LIVE,ET(a5)
 .qr:     rts
-.alarm: move.l  a0,-(sp)                ; every guard on the floor wakes...
+.alarm: moveq   #V_ALARM,d0
+        bsr     say
+        move.l  a0,-(sp)                ; every guard on the floor wakes...
         lea     ENEMY(a5),a0
         moveq   #1,d7
 .al:    move.w  #ALARM_FRAMES,E_ALARM(a0)
@@ -1000,6 +1186,8 @@ gate_update:
         beq.s   .qr
 .shut:  clr.w   G_OPEN(a1)
         clr.w   G_T(a1)
+        moveq   #V_SLAM,d0
+        bsr     say
         lea     LEVERS(a5),a0
         cmp.w   #1,FLOOR(a5)
         beq.s   .lv
@@ -1041,6 +1229,8 @@ enemies_update:
         neg.w   d3                      ; d3 = |dx|
 .ab:    cmp.w   #T_WATCHER,E_TYPE(a0)
         beq     .archer
+        cmp.w   #T_HOUND,E_TYPE(a0)
+        beq     .hound
 
         ; ---- chase? ---------------------------------------
         moveq   #0,d5
@@ -1101,10 +1291,62 @@ enemies_update:
 .after: bsr     avoid_track
         bsr     enemy_touch
         tst.w   d0
-        beq.s   .next
+        beq     .next
+        moveq   #V_GUARDKILL,d0
+        bsr     say
         move.w  E_ORG(a0),d0
         bsr     kill
-        bra.s   .next
+        bra     .next
+
+.hound: ; Castle Hound: fast, predictable patrol; sniffs at each end. A
+        ; hero just ahead of it gets a telegraphed lunge: it crouches 10
+        ; frames, lunges x1.5 for 20, then must recover 45. Jump it; it
+        ; can't be shoved.
+        tst.w   E_SHOOT(a0)
+        beq.s   .hgo
+        subq.w  #1,E_SHOOT(a0)
+        bra     .after
+.hgo:   move.w  E_SPD(a0),d0
+        move.w  E_LUNGE(a0),d6
+        beq.s   .hnew
+        subq.w  #1,E_LUNGE(a0)
+        cmp.w   #20,d6
+        bgt     .after                  ; crouched: the warning
+        move.w  d0,d6
+        lsr.w   #1,d6
+        add.w   d6,d0                   ; lunge x1.5
+        cmp.w   #1,E_LUNGE+0(a0)        ; (already decremented: 0 = last frame)
+        bge.s   .hmv
+        move.w  #45,E_SHOOT(a0)         ; spent: recover
+        bra.s   .hmv
+.hnew:  tst.w   CLIMB(a5)
+        bne.s   .hmv
+        move.w  d2,d6
+        muls    E_DIR(a0),d6
+        ble.s   .hmv
+        cmp.w   #48,d6
+        bgt.s   .hmv
+        move.w  #30,E_LUNGE(a0)         ; hero ahead: crouch, then lunge
+        bra     .after
+.hmv:   muls    E_DIR(a0),d0
+        add.w   E_X(a0),d0
+        move.w  E_MIN(a0),d1
+        lsl.w   #4,d1
+        cmp.w   d1,d0
+        bgt.s   .hmax
+        move.w  d1,d0
+        move.w  #1,E_DIR(a0)
+        move.w  #30,E_SHOOT(a0)
+        bra.s   .hst
+.hmax:  move.w  E_MAX(a0),d1
+        lsl.w   #4,d1
+        cmp.w   d1,d0
+        blt.s   .hst
+        move.w  d1,d0
+        move.w  #-1,E_DIR(a0)
+        move.w  #30,E_SHOOT(a0)
+.hst:   move.w  d0,E_X(a0)
+        bra     .after
 
 .archer:
         moveq   #1,d6                   ; face the hero
@@ -1135,6 +1377,8 @@ enemies_update:
         bsr     enemy_touch
         tst.w   d0
         beq.s   .next
+        moveq   #V_GUARDKILL,d0
+        bsr     say
         move.w  E_ORG(a0),d0
         bsr     kill
 .next:  lea     32(a0),a0
@@ -1174,8 +1418,10 @@ enemy_touch:
         neg.w   d1
 .qp:     cmp.w   #9,d1
         bge.s   .qr
-        move.w  #FLOOR_HL-24,d1         ; skull: lower 12 rows hurt
+        move.w  #FLOOR_HL-24,d1         ; 16-row enemies (skull, hound): lower 24 halflines hurt
         tst.w   E_TYPE(a0)
+        beq.s   .qt
+        cmp.w   #T_HOUND,E_TYPE(a0)
         beq.s   .qt
         move.w  #FLOOR_HL-36,d1         ; 24-row enemies: below the helmet
 .qt:    sub.w   #48,d1
@@ -1213,6 +1459,8 @@ arrow_update:
         cmp.w   #FLOOR_HL-24,d0         ; knee height: jump to dodge
         ble.s   .qr
         clr.w   AON(a5)
+        moveq   #V_ARROW,d0
+        bsr     say
         moveq   #C_GUARD,d0
         bra     kill
 .off:   clr.w   AON(a5)
@@ -1250,6 +1498,8 @@ hazards_update:
         cmp.w   d1,d0
         ble.s   .sn
         addq.w  #1,R_BASE+CTR_TRAPS(a5)
+        moveq   #V_SPIKES,d0
+        bsr     say
         move.w  SP_ORG(a0),d0
         bra     kill
 .sn:    lea     8(a0),a0
@@ -1275,9 +1525,182 @@ hazards_update:
         addq.w  #8,d0
         cmp.w   EX(a5),d0
         ble.s   .qr
-        moveq   #C_LEVER,d0
+        moveq   #V_LEVERKILL,d0
+        cmp.w   #C_CHEST,ECAUSE(a5)
+        bne.s   .ev
+        moveq   #V_CHESTKILL,d0
+.ev:    bsr     say
+        move.w  ECAUSE(a5),d0
         bra     kill
 .qr:     rts
+
+; ============================================================
+; props_update — gift shard, falling masonry, swinging blade
+; ============================================================
+props_update:
+        ; ---- gift shard behind the open F3 door: hop to take it ----
+        cmp.w   #2,FLOOR(a5)
+        bne.s   .ng
+        move.w  GIFT_X(a5),d1
+        beq.s   .ng
+        tst.w   GIFT_TAKEN(a5)
+        bne.s   .ng
+        cmp.w   #GIFT_Y+16,HY(a5)
+        bge.s   .ng
+        move.w  HX(a5),d0
+        addq.w  #4,d0                   ; hero x+4..x+12 vs shard x..x+8
+        move.w  d1,d2
+        addq.w  #8,d2
+        cmp.w   d2,d0
+        bge.s   .ng
+        addq.w  #8,d0
+        cmp.w   d1,d0
+        ble.s   .ng
+        move.w  #1,GIFT_TAKEN(a5)
+        addq.w  #1,SHARDS(a5)
+        move.w  #1,HUDDIRTY(a5)
+        moveq   #V_GIFT,d0
+        bsr     say
+.ng:
+        ; ---- falling masonry: punishes standing still under cracks ----
+        move.w  FLOOR(a5),d0
+        add.w   d0,d0
+        lea     FBX(a5),a0
+        move.w  0(a0,d0.w),d1           ; d1 = block x (0: none here)
+        beq     .nb
+        move.w  FB_PH(a5),d0
+        beq.s   .hang
+        cmp.w   #1,d0
+        beq.s   .warn
+        cmp.w   #2,d0
+        beq.s   .fall
+        subq.w  #1,FB_T(a5)             ; 3: rubble, then it resets
+        bne     .nb
+        clr.w   FB_PH(a5)
+        move.w  #FB_TOP,FB_Y(a5)
+        bra     .nb
+.hang:  bsr     under_block
+        tst.w   d0
+        bne.s   .und
+        clr.w   FB_T(a5)
+        bra     .nb
+.und:   addq.w  #1,FB_T(a5)
+        cmp.w   #FB_LOITER,FB_T(a5)
+        blt     .nb
+        move.w  #1,FB_PH(a5)
+        move.w  #FB_WARN,FB_T(a5)
+        moveq   #V_CEILING,d0
+        bsr     say
+        bra     .nb
+.warn:  subq.w  #1,FB_T(a5)
+        bne     .nb
+        move.w  #2,FB_PH(a5)
+        bra     .nb
+.fall:  add.w   #12,FB_Y(a5)
+        cmp.w   #FLOOR_HL-32,FB_Y(a5)
+        blt.s   .hit
+        move.w  #FLOOR_HL-32,FB_Y(a5)
+        move.w  #3,FB_PH(a5)
+        move.w  #FB_RUBBLE,FB_T(a5)
+.hit:   tst.w   CLIMB(a5)               ; ladders stay safe
+        bne.s   .nb
+        move.w  HX(a5),d0
+        addq.w  #4,d0                   ; hero x+4..x+12 vs block x+2..x+14
+        move.w  d1,d2
+        add.w   #14,d2
+        cmp.w   d2,d0
+        bge.s   .nb
+        addq.w  #8,d0
+        move.w  d1,d2
+        addq.w  #2,d2
+        cmp.w   d2,d0
+        ble.s   .nb
+        move.w  FB_Y(a5),d0
+        add.w   #32,d0                  ; block bottom below the hero's head?
+        move.w  HY(a5),d2
+        addq.w  #8,d2
+        cmp.w   d2,d0
+        ble.s   .nb
+        moveq   #V_CRUSHED,d0
+        bsr     say
+        moveq   #C_PACE,d0
+        bra     kill
+.nb:
+        ; ---- swinging blade (F3): fixed 2 s rhythm, pass on the back-swing
+        cmp.w   #2,FLOOR(a5)
+        bne.s   .r
+        tst.w   BLADE_CX(a5)
+        beq.s   .r
+        tst.w   CLIMB(a5)
+        bne.s   .r
+        bsr     blade_pos               ; d1 = x, d2 = y
+        move.w  HX(a5),d0
+        addq.w  #4,d0                   ; hero x+4..x+12 vs blade x+3..x+13
+        move.w  d1,d3
+        add.w   #13,d3
+        cmp.w   d3,d0
+        bge.s   .r
+        addq.w  #8,d0
+        addq.w  #3,d1
+        cmp.w   d1,d0
+        ble.s   .r
+        move.w  d2,d3
+        add.w   #32,d3                  ; blade bottom must reach the body...
+        move.w  HY(a5),d0
+        addq.w  #8,d0
+        cmp.w   d0,d3
+        ble.s   .r
+        move.w  HY(a5),d0               ; ...and its top be above the feet
+        add.w   #48,d0
+        cmp.w   d0,d2
+        bge.s   .r
+        moveq   #V_BLADE,d0
+        bsr     say
+        moveq   #C_PACE,d0
+        bra     kill
+.r:     rts
+
+; under_block — d1 = block x; d0 = 1 if the hero stands (grounded) beneath it
+under_block:
+        moveq   #0,d0
+        tst.w   CLIMB(a5)
+        bne.s   .r
+        cmp.w   #GROUND_Y,HY(a5)
+        bne.s   .r
+        move.w  HX(a5),d2
+        addq.w  #4,d2
+        move.w  d1,d3
+        add.w   #14,d3
+        cmp.w   d3,d2
+        bge.s   .r
+        addq.w  #8,d2
+        move.w  d1,d3
+        addq.w  #2,d3
+        cmp.w   d3,d2
+        ble.s   .r
+        moveq   #1,d0
+.r:     rts
+
+; blade_pos — out d1 = blade x, d2 = blade top (halflines).
+;   Swings +-30 px every 120 frames; low (deadly) only near the middle.
+blade_pos:
+        move.l  RUNT(a5),d0
+        divu    #120,d0
+        swap    d0
+        sub.w   #60,d0
+        bpl.s   .b1
+        neg.w   d0
+.b1:    sub.w   #30,d0                  ; offset -30..30
+        move.w  BLADE_CX(a5),d1
+        subq.w  #8,d1
+        add.w   d0,d1
+        tst.w   d0
+        bpl.s   .b2
+        neg.w   d0
+.b2:    add.w   d0,d0
+        move.w  #GROUND_Y-4,d2          ; low point still meets the torso; deadly only while |offset| < 10
+        sub.w   d0,d2
+        rts
 
 ; spike_up — a0 = spike; d0 = 1 if raised now
 spike_up:
@@ -1313,6 +1736,8 @@ exit_check:
         bge.s   .qr
         move.w  #2,GSTATE(a5)
         move.w  #WIN_FRAMES,GTIMER(a5)
+        moveq   #V_ESCAPED,d0
+        bsr     say
 .qr:     rts
 
 ; ============================================================
@@ -1331,6 +1756,14 @@ new_run:
         clr.w   GSTATE(a5)
         clr.w   SIDE_BIAS(a5)
         clr.w   WHISPER(a5)
+        lea     CHSTATE(a5),a0          ; chests shut, no shards yet
+        moveq   #3,d0
+.cs:    clr.w   (a0)+
+        dbra    d0,.cs
+        clr.w   SHARDS(a5)
+        clr.w   GIFT_TAKEN(a5)
+        clr.w   VOICE_ID(a5)
+        clr.w   VOICE_T(a5)
         move.w  #LAD_C,HX(a5)
         move.w  #GROUND_Y,HY(a5)
         move.w  #1,FACING(a5)
@@ -1341,6 +1774,9 @@ new_run:
         tst.w   NOTES(a5)               ; rebuilt castle: it remembers
         beq.s   .qr
         move.w  #WHISPER_FRAMES,WHISPER(a5)
+        move.w  FVOICE(a5),d0
+        beq.s   .qr
+        bsr     say
 .qr:     rts
 
 ; enter_floor — d0 = floor 0..4. Wakes that floor's planned enemies.
@@ -1360,7 +1796,19 @@ enter_floor:
         tst.w   d0
         beq.s   .seen                   ; F1 whisper plays at run start
         move.w  #WHISPER_FRAMES,WHISPER(a5)
-.seen:  lea     FENEMY(a5),a1
+        move.w  d0,d1
+        add.w   d1,d1
+        lea     FVOICE(a5),a1
+        move.w  0(a1,d1.w),d1
+        beq.s   .seen
+        move.w  d0,-(sp)
+        move.w  d1,d0
+        bsr     say
+        move.w  (sp)+,d0
+.seen:  clr.w   FB_PH(a5)               ; masonry hangs again on every visit
+        clr.w   FB_T(a5)
+        move.w  #FB_TOP,FB_Y(a5)
+        lea     FENEMY(a5),a1
         lsl.w   #6,d0
         add.w   d0,a1
         lea     ENEMY(a5),a0
@@ -1390,12 +1838,20 @@ enter_floor:
         beq.s   .nr
         mulu    #27,d1                  ; rush: guards x1.35
         divu    #20,d1
-.nr:    move.w  d1,E_SPD(a0)
+.nr:    cmp.w   #T_HOUND,E_TYPE(a0)     ; keep the hound below hero speed
+        bne.s   .nh
+        cmp.w   #28,d1
+        ble.s   .nh
+        moveq   #28,d1
+.nh:    move.w  d1,E_SPD(a0)
         clr.w   E_STUN(a0)
         clr.w   E_ALARM(a0)
         clr.w   E_CNT(a0)
         clr.w   E_SIDE(a0)
         move.w  #ARCHER_CD/2,E_SHOOT(a0)
+        cmp.w   #T_HOUND,E_TYPE(a0)
+        bne.s   .qn
+        move.w  #45,E_SHOOT(a0)         ; hound: sniffs as you arrive (no blind spawn)
 .qn:     lea     32(a0),a0
         lea     32(a1),a1
         dbra    d7,.qe
@@ -1406,6 +1862,18 @@ enter_floor:
 ; ============================================================
 end_run:
         move.w  d0,d7
+        ; ---- chests left shut on floors you stood on ---------------
+        lea     CHSTATE(a5),a0
+        moveq   #0,d1
+.sk:    btst    d1,SEEN+1(a5)
+        beq.s   .skn
+        tst.w   (a0)
+        bne.s   .skn
+        addq.w  #1,R_BASE+CTR_SKIP(a5)
+.skn:   addq.l  #2,a0
+        addq.w  #1,d1
+        cmp.w   #4,d1
+        blt.s   .sk
         ; ---- pace: rush if idle < 18% of the run ---------------
         move.l  IDLE(a5),d0
         move.l  RUNT(a5),d1
@@ -1478,7 +1946,7 @@ end_run:
         subq.w  #1,d0
 .pn:    move.w  d0,(a0)+
         addq.w  #1,d6
-        cmp.w   #5,d6
+        cmp.w   #NCAT,d6
         blt.s   .pl
 
         addq.w  #1,RUNS(a5)
@@ -1506,7 +1974,10 @@ used_mask:
 .q3:     tst.w   R_BASE+CTR_TRAPS(a5)
         beq.s   .q4
         bset    #C_TRAP,d3
-.q4:     rts
+.q4:     tst.w   R_BASE+CTR_CHESTS(a5)
+        beq.s   .q5
+        bset    #C_CHEST,d3
+.q5:    rts
 
 ; favored — d0 = a (left), d1 = b (right), x100.
 ;   Out d0 = -1 left, +1 right, 0 no clear preference.
@@ -1567,7 +2038,7 @@ build_plan:
         lea     32(a0),a0
         dbra    d0,.qt
         lea     T_DOOR(a5),a0
-        moveq   #8,d0                   ; tiers + both sides
+        moveq   #(SIDE_LEVER-T_DOOR)/2,d0       ; tiers + both sides
 .qz:     clr.w   (a0)+
         dbra    d0,.qz
         clr.w   NOTES(a5)
@@ -1589,6 +2060,25 @@ build_plan:
         move.w  #60,SPIKE_ON(a5)
         move.w  #180,STUN_T(a5)
         move.w  #EXIT_RX,EXIT_X(a5)
+        lea     ladtab,a1               ; ladders: canon layout (the plan may add
+        lea     LADS(a5),a0             ; a long ladder)
+        moveq   #29,d0
+.qla:   move.w  (a1)+,(a0)+
+        dbra    d0,.qla
+        lea     CHTRAP(a5),a0           ; chests real; no shard, masonry, blade,
+        moveq   #3,d0                   ; or whispers until the castle learns
+.qch:   clr.w   (a0)+
+        dbra    d0,.qch
+        clr.w   GIFT_X(a5)
+        lea     FBX(a5),a0
+        moveq   #4,d0
+.qfb:   clr.w   (a0)+
+        dbra    d0,.qfb
+        clr.w   BLADE_CX(a5)
+        lea     FVOICE(a5),a0
+        moveq   #4,d0
+.qfv:   clr.w   (a0)+
+        dbra    d0,.qfv
 
         ; F3 corridors always have static spikes
         lea     FSPIKE+(2*16)(a5),a0
@@ -1648,13 +2138,27 @@ build_plan:
         moveq   #C_TRAP,d0
         bsr     tier_of
         move.w  d0,T_TRAP(a5)
-.nt:    ; escapes: the way out moves away from your favourite side
+.nt:    ; greed: opened chests clearly outnumber the ones left shut
+        moveq   #0,d1
+        move.w  M_BASE+CTR_CHESTS(a5),d1
+        cmp.l   #150,d1
+        blo.s   .nc
+        moveq   #0,d2
+        move.w  M_BASE+CTR_SKIP(a5),d2
+        add.l   d2,d2
+        cmp.l   d2,d1
+        bls.s   .nc
+        moveq   #C_CHEST,d0
+        bsr     tier_of
+        move.w  d0,T_CHEST(a5)
+.nc:    ; escapes: the way out moves away from your favourite side
         tst.w   WINS(a5)
-        beq.s   place
+        beq     place
         cmp.w   #1,SIDE_DOOR(a5)
-        bne.s   place
+        bne     place
         move.w  #EXIT_LX,EXIT_X(a5)
         bset    #4,NOTES+1(a5)
+        move.w  #V_EXITMOVED,FVOICE+(4*2)(a5)
 
 place:
         ; ---- base guard type (watch -> chasers, brace 3 -> heavies)
@@ -1690,6 +2194,12 @@ place:
         moveq   #-1,d2
 .g1s:   moveq   #C_GUARD,d7
         bsr     set_enemy
+        cmp.w   #2,T_BRACE(a5)          ; shove-happy: a hound that can't be shoved
+        blt.s   .g1h
+        move.w  #T_HOUND,E_TYPE(a0)
+        clr.w   E_ARM(a0)
+        clr.w   E_CHASE(a0)
+.g1h:
 
         ; ---- G3, F4 ----------------------------------------
         lea     FENEMY+(3*64)(a5),a0
@@ -1704,6 +2214,18 @@ place:
         moveq   #-1,d2
         moveq   #C_GUARD,d7
         bsr     set_enemy
+        cmp.w   #3,T_BRACE(a5)
+        blt.s   .g3h
+        move.w  #T_HOUND,E_TYPE(a0)
+        clr.w   E_ARM(a0)
+        clr.w   E_CHASE(a0)
+        cmp.w   #240,E_MAX(a0)          ; its sniff spot must not sit at the chest
+        ble.s   .g3h
+        move.w  #240,E_MAX(a0)
+        cmp.w   #240,E_X(a0)
+        ble.s   .g3h
+        move.w  #240,E_X(a0)
+.g3h:
 
         ; ---- G4, F5: the Judgment Wraith ---------------------
         lea     FENEMY+(4*64)(a5),a0
@@ -1743,12 +2265,22 @@ place:
 .g4a:   cmp.w   #C_PACE,d7
         bne.s   .doors
         bset    #4,NOTES+1(a5)
+        move.w  #V_RUSH,FVOICE+(4*2)(a5)
+        tst.w   T_RUSH(a5)
+        bne.s   .doors
+        move.w  #V_WAIT,FVOICE+(4*2)(a5)
 
         ; ---- DOOR habit -------------------------------------
 .doors: move.w  T_DOOR(a5),d0
         beq     .levers
         bset    #0,NOTES+1(a5)
         bset    #2,NOTES+1(a5)
+        moveq   #V_GOLEFT,d2
+        tst.w   SIDE_DOOR(a5)
+        bmi.s   .dv
+        moveq   #V_GORIGHT,d2
+.dv:    move.w  d2,FVOICE+(0*2)(a5)
+        move.w  d2,FVOICE+(2*2)(a5)
         moveq   #0,d1                   ; d1 = favoured slot (0 L / 1 R)
         tst.w   SIDE_DOOR(a5)
         bmi.s   .ds
@@ -1768,6 +2300,11 @@ place:
         bne.s   .dg
         lea     8(a0),a0
 .dg:    move.w  #1,D_OPEN(a0)
+        move.w  #280,GIFT_X(a5)         ; a memory shard waits behind the gift door
+        tst.w   d1
+        beq.s   .dgx
+        move.w  #32,GIFT_X(a5)
+.dgx:
         ; t 1..2: F3 guard in the favoured corridor
         cmp.w   #3,T_DOOR(a5)
         bge.s   .d3
@@ -1799,7 +2336,21 @@ place:
         move.w  #C_DOOR,SP_ORG(a0)
 .d2:    cmp.w   #2,T_DOOR(a5)
         blt     .levers
-.d3:    ; t>=2: favoured F1 door moves tight against the spikes
+.d3:    ; t>=2: the long ladder (canon, drawn gold): the avoided side's F1
+        ; ladder runs on through F2 to F3, skipping the lever floor.
+        ; LADS kinds: 1 up, 2 hole, 4 gold. F1/F3 entries 0,1 = L,R; F2 1,2 = L,R
+        tst.w   SIDE_DOOR(a5)
+        bmi.s   .llr
+        move.w  #5,LADS+2(a5)           ; favoured R: long ladder on the left
+        move.w  #7,LADS+18(a5)
+        move.w  #3,LADS+26(a5)
+        bra.s   .lld
+.llr:   move.w  #5,LADS+6(a5)           ; favoured L: long ladder on the right
+        move.w  #7,LADS+22(a5)
+        move.w  #3,LADS+30(a5)
+.lld:   move.w  #V_LONGLADDER,FVOICE+(1*2)(a5)
+        bset    #1,NOTES+1(a5)
+        ; t>=2: favoured F1 door moves tight against the spikes
         tst.w   SIDE_DOOR(a5)
         bmi.s   .dtl
         move.w  #DOOR_RT,DOORS+8+D_X(a5)
@@ -1835,6 +2386,8 @@ place:
         beq.s   .pace
         bset    #1,NOTES+1(a5)
         bset    #3,NOTES+1(a5)
+        move.w  #V_LEVER,FVOICE+(1*2)(a5)
+        move.w  #V_LEVER,FVOICE+(3*2)(a5)
         moveq   #0,d1                   ; byte offset of favoured lever
         moveq   #4,d2                   ; ... and of the other one
         tst.w   SIDE_LEVER(a5)
@@ -1853,7 +2406,10 @@ place:
 
         ; ---- PACE habit -------------------------------------
 .pace:  move.w  T_RUSH(a5),d0
-        beq.s   .wait
+        beq     .wait
+        move.w  #BLADE_REST,BLADE_CX(a5) ; t>=1: a blade swings on F3 (pass on the back-swing)
+        bset    #2,NOTES+1(a5)
+        move.w  #V_RUSH,FVOICE+(2*2)(a5)
         cmp.w   #2,d0
         blt     .guards
         bset    #2,NOTES+1(a5)
@@ -1871,6 +2427,7 @@ place:
         cmp.w   #3,T_RUSH(a5)
         blt     .guards
         bset    #1,NOTES+1(a5)
+        move.w  #V_RUSH,FVOICE+(1*2)(a5)
         lea     FSPIKE+(1*16)(a5),a0      ; spikes flank the F2 centre ladder
         move.w  #114,SP_X(a0)
         move.w  #190,8+SP_X(a0)
@@ -1885,12 +2442,16 @@ place:
         beq.s   .guards
         bset    #1,NOTES+1(a5)
         bset    #3,NOTES+1(a5)
+        move.w  #V_WAIT,FVOICE+(1*2)(a5)
+        move.w  #V_WAIT,FVOICE+(3*2)(a5)
         lea     closetab,a0
         add.w   d0,d0
         move.w  -2(a0,d0.w),AUTOCLOSE(a5)
+        move.w  #112,FBX+(3*2)(a5)      ; t>=1: cracked masonry over F4
         cmp.w   #4,d0
         blt     .guards
         move.w  #78,SPIKE_ON(a5)
+        move.w  #172,FBX+(1*2)(a5)      ; t>=2: ...and over F2
 
         ; ---- GUARD habit ------------------------------------
 .guards:
@@ -1898,9 +2459,15 @@ place:
         beq.s   .watch
         move.w  #72,STUN_T(a5)          ; shoves stun for less
         bset    #4,NOTES+1(a5)
+        move.w  #V_BRACE,FVOICE+(4*2)(a5)
+        cmp.w   #2,d0
+        blt.s   .watch
+        bset    #1,NOTES+1(a5)          ; t>=2: the F2 hound
+        move.w  #V_BRACE,FVOICE+(1*2)(a5)
 .watch: cmp.w   #3,T_WATCH(a5)
         blt.s   .traps
         bset    #3,NOTES+1(a5)
+        move.w  #V_WATCH,FVOICE+(3*2)(a5)
         lea     FENEMY+(3*64)+32(a5),a0   ; a Stone Watcher on F4
         moveq   #T_WATCHER,d0
         move.w  #52,d1
@@ -1912,22 +2479,25 @@ place:
 
         ; ---- TRAP deaths ------------------------------------
 .traps: move.w  T_TRAP(a5),d0
-        beq.s   .esc
+        beq     .chests
         bset    #2,NOTES+1(a5)
+        move.w  #V_TRAPS,FVOICE+(2*2)(a5)
         move.w  #24,FSPIKE+(2*16)+SP_W(a5) ; F3 spikes widen
         move.w  #320-55-24,FSPIKE+(2*16)+8+SP_X(a5)
         move.w  #24,FSPIKE+(2*16)+8+SP_W(a5)
         cmp.w   #2,d0
-        blt.s   .esc
+        blt.s   .chests
         bset    #3,NOTES+1(a5)
+        move.w  #V_TRAPS,FVOICE+(3*2)(a5)
         lea     FSPIKE+(3*16)(a5),a0
         move.w  #190,SP_X(a0)
         move.w  #16,SP_W(a0)
         move.w  #120,SP_PER(a0)
         move.w  #C_TRAP,SP_ORG(a0)
         cmp.w   #3,d0
-        blt.s   .esc
+        blt.s   .chests
         bset    #4,NOTES+1(a5)
+        move.w  #V_TRAPS,FVOICE+(4*2)(a5)
         lea     FSPIKE+(4*16)(a5),a0      ; spikes beside the exit
         move.w  #255,SP_X(a0)
         cmp.w   #EXIT_RX,EXIT_X(a5)
@@ -1937,10 +2507,29 @@ place:
         move.w  #120,SP_PER(a0)
         move.w  #C_TRAP,SP_ORG(a0)
 
+        ; ---- GREED: chests turn on the greedy (F3's is always real) ----
+.chests:
+        move.w  T_CHEST(a5),d0
+        beq.s   .esc
+        move.w  #1,CHTRAP+(3*2)(a5)     ; t1: F4
+        bset    #3,NOTES+1(a5)
+        move.w  #V_GREED,FVOICE+(3*2)(a5)
+        cmp.w   #2,d0
+        blt.s   .esc
+        move.w  #1,CHTRAP+(1*2)(a5)     ; t2: F2
+        bset    #1,NOTES+1(a5)
+        move.w  #V_GREED,FVOICE+(1*2)(a5)
+        cmp.w   #3,d0
+        blt.s   .esc
+        move.w  #1,CHTRAP+(0*2)(a5)     ; t3: F1
+        bset    #0,NOTES+1(a5)
+        move.w  #V_GREED,FVOICE+(0*2)(a5)
+
         ; ---- ESCAPES: a Stone Watcher guards the exit -------------
 .esc:   cmp.w   #2,WINS(a5)
         blt.s   .qr
         bset    #4,NOTES+1(a5)
+        move.w  #V_NOLEAVE,FVOICE+(4*2)(a5)
         lea     FENEMY+(4*64)+32(a5),a0
         moveq   #T_WATCHER,d0
         move.w  #219,d1
@@ -1978,7 +2567,7 @@ set_enemy:
 set_objects:
         lea     OBJS,a4
         ; ---- ladders ------------------------------------------
-        lea     ladtab,a0
+        lea     LADS(a5),a0
         move.w  FLOOR(a5),d0
         mulu    #12,d0
         add.w   d0,a0
@@ -1987,16 +2576,22 @@ set_objects:
 .lad:   move.w  (a0)+,OB_X(a1)
         move.w  (a0)+,d0
         move.l  #PIXBASE+(img_ladder-pix_start),OB_DATA(a1)
-        move.w  #4,OB_W(a1)
+        btst    #2,d0
+        beq.s   .lg
+        move.l  #PIXBASE+(img_ladder_gold-pix_start),OB_DATA(a1)
+.lg:    move.w  #4,OB_W(a1)
         clr.w   OB_H(a1)
-        cmp.w   #1,d0
-        bne.s   .lh
-        move.w  #20,OB_Y(a1)
+        and.w   #3,d0
+        beq.s   .ln
+        cmp.w   #2,d0
+        beq.s   .lh
+        move.w  #20,OB_Y(a1)            ; up-ladder: through the ceiling
         move.w  #200,OB_H(a1)
-        bra.s   .ln
-.lh:    cmp.w   #2,d0
+        cmp.w   #3,d0
         bne.s   .ln
-        move.w  #FLOOR_HL+16,OB_Y(a1)
+        move.w  #242,OB_H(a1)           ; up + hole: one ladder through the floor
+        bra.s   .ln
+.lh:    move.w  #FLOOR_HL+16,OB_Y(a1)
         move.w  #34,OB_H(a1)
 .ln:    lea     16(a1),a1
         dbra    d7,.lad
@@ -2092,6 +2687,77 @@ set_objects:
         move.w  #LEVER_RX,d1
         dbra    d7,.ll
 .ng:
+        ; ---- props, each in a slot this floor leaves idle (no new OP objects)
+        ; chest: F1/F3 use the gate slot, F2/F4 the left door slot
+        move.w  FLOOR(a5),d0
+        cmp.w   #4,d0
+        bge.s   .nochest
+        lea     O_GATE*16(a4),a1
+        btst    #0,d0
+        beq.s   .chs
+        lea     O_DOORL*16(a4),a1
+.chs:   add.w   d0,d0
+        lea     chestx,a0
+        move.w  0(a0,d0.w),OB_X(a1)
+        move.w  #FLOOR_HL-24,OB_Y(a1)
+        move.w  #12,OB_H(a1)
+        move.w  #4,OB_W(a1)
+        move.l  #PIXBASE+(img_chest_open-pix_start),d1
+        lea     CHSTATE(a5),a0
+        tst.w   0(a0,d0.w)
+        bne.s   .chi
+        move.l  #PIXBASE+(img_chest_closed-pix_start),d1
+        lea     CHTRAP(a5),a0
+        tst.w   0(a0,d0.w)
+        beq.s   .chi
+        move.l  #PIXBASE+(img_chest_trap-pix_start),d1   ; red clasp: the canon tell
+.chi:   move.l  d1,OB_DATA(a1)
+.nochest:
+        ; gift shard: F3, exit slot
+        cmp.w   #2,FLOOR(a5)
+        bne.s   .nogs
+        move.w  GIFT_X(a5),d0
+        beq.s   .nogs
+        tst.w   GIFT_TAKEN(a5)
+        bne.s   .nogs
+        lea     O_EXIT*16(a4),a1
+        move.w  d0,OB_X(a1)
+        move.w  #GIFT_Y,OB_Y(a1)
+        move.w  #8,OB_H(a1)
+        move.w  #2,OB_W(a1)
+        move.l  #PIXBASE+(img_shard-pix_start),OB_DATA(a1)
+.nogs:
+        ; falling masonry: lever floors, the right door slot
+        move.w  FLOOR(a5),d0
+        add.w   d0,d0
+        lea     FBX(a5),a0
+        move.w  0(a0,d0.w),d1
+        beq.s   .nofb
+        lea     O_DOORR*16(a4),a1
+        move.w  d1,OB_X(a1)
+        move.w  FB_Y(a5),OB_Y(a1)
+        move.w  #16,OB_H(a1)
+        move.w  #4,OB_W(a1)
+        move.l  #PIXBASE+(img_block-pix_start),OB_DATA(a1)
+        cmp.w   #1,FB_PH(a5)            ; warning: it shakes
+        bne.s   .nofb
+        btst    #1,FB_T+1(a5)
+        beq.s   .nofb
+        addq.w  #2,OB_X(a1)
+.nofb:
+        ; swinging blade: F3, the left lever slot
+        cmp.w   #2,FLOOR(a5)
+        bne.s   .nobl
+        tst.w   BLADE_CX(a5)
+        beq.s   .nobl
+        bsr     blade_pos
+        lea     O_LEVL*16(a4),a1
+        move.w  d1,OB_X(a1)
+        move.w  d2,OB_Y(a1)
+        move.w  #16,OB_H(a1)
+        move.w  #4,OB_W(a1)
+        move.l  #PIXBASE+(img_blade-pix_start),OB_DATA(a1)
+.nobl:
         ; ---- spikes -------------------------------------------
         lea     O_SPKA*16(a4),a1
         lea     FSPIKE(a5),a0
@@ -2162,15 +2828,20 @@ set_objects:
         lsl.w   #2,d0
         lea     enimg,a2
         move.l  0(a2,d0.w),OB_DATA(a1)
-        move.w  #24,d1
-        tst.w   E_TYPE(a0)
-        bne.s   .e24
-        moveq   #16,d1
+        move.w  E_TYPE(a0),d1
+        add.w   d1,d1
+        lea     enrows,a2
+        move.w  0(a2,d1.w),d1
 .e24:   move.w  d1,OB_H(a1)
         add.w   d1,d1
         neg.w   d1
         add.w   #FLOOR_HL,d1
-        move.w  d1,OB_Y(a1)
+        cmp.w   #T_HOUND,E_TYPE(a0)     ; a crouching hound sits lower: the tell
+        bne.s   .ey
+        cmp.w   #20,E_LUNGE(a0)
+        ble.s   .ey
+        addq.w  #4,d1
+.ey:    move.w  d1,OB_Y(a1)
 .enn:   lea     32(a0),a0
         lea     16(a1),a1
         dbra    d7,.en
@@ -2240,7 +2911,22 @@ draw_hud:
         addq.w  #1,d6
         cmp.w   #5,d6
         blt.s   .qf
-        ; memory: five categories x three pips (tier)
+        ; memory shards this run (up to 8)
+        moveq   #0,d6
+.sh:    cmp.w   SHARDS(a5),d6
+        bge.s   .shd
+        cmp.w   #8,d6
+        bge.s   .shd
+        move.w  d6,d0
+        mulu    #7,d0
+        add.w   #60,d0
+        moveq   #5,d1
+        move.w  #$78F1,d2
+        bsr     hud_rect
+        addq.w  #1,d6
+        bra.s   .sh
+.shd:
+        ; memory: six categories x three pips (tier)
         lea     hudcats,a3
         moveq   #0,d6
 .qm:     move.w  (a3)+,d0                ; tier offset (or two, max taken)
@@ -2259,7 +2945,7 @@ draw_hud:
         move.w  d3,d2
 .mc:    move.w  d6,d0
         mulu    #26,d0
-        add.w   #186,d0
+        add.w   #160,d0
         move.w  d5,d1
         mulu    #8,d1
         add.w   d1,d0
@@ -2269,7 +2955,7 @@ draw_hud:
         cmp.w   #3,d5
         blt.s   .mp
         addq.w  #1,d6
-        cmp.w   #5,d6
+        cmp.w   #NCAT,d6
         blt.s   .qm
         rts
 
@@ -2292,7 +2978,8 @@ hud_rect:
 ; TABLES
 ; ============================================================
         .even
-; ladders per floor: (x, kind) x3 — kind 1 up, 2 hole from below
+; ladders per floor: (x, kind bits) x3 — 1 up, 2 hole from below, 4 gold.
+; build_plan copies this into LADS and may add the long ladder.
 ladtab:
         dc.w    LAD_L,1, LAD_R,1, 0,0           ; F1
         dc.w    LAD_C,1, LAD_L,2, LAD_R,2       ; F2
@@ -2303,11 +2990,18 @@ ladtab:
 ; Ratios follow the original (guard 70 vs player 230 px/s, x1.25 patrol,
 ; x0.85 heavy); hero walks 32, so even a rushed, alarmed guard is slower.
 speedtab:
-        dc.w    12, 15, 10, 0, 16
+        dc.w    12, 15, 10, 0, 16, 26           ; skull guard heavy watcher wraith hound
+; sprite rows per enemy type (art contract: skull and hound 16x16, others 16x24)
+enrows:
+        dc.w    16, 24, 24, 24, 24, 16
+; chest x per floor F1..F4 (canon 420/590/300/600, scaled)
+chestx:
+        dc.w    180, 261, 123, 266
 ; memory counter -> category (decay exemption on a death of that cause)
 ctrcat:
         dc.w    C_DOOR,C_DOOR,C_LEVER,C_LEVER,C_LEVER
         dc.w    C_PACE,C_PACE,C_GUARD,C_GUARD,C_TRAP
+        dc.w    C_CHEST,C_CHEST
 ; gate auto-close frames for wait tier 1..3 (5 / 3.5 / 2.5 s)
 closetab:
         dc.w    300, 210, 150
@@ -2318,9 +3012,60 @@ hudcats:
         dc.w    T_RUSH,T_WAIT,$2BDD             ; pace   - cyan
         dc.w    T_BRACE,T_WATCH,$E2DD           ; guards - red
         dc.w    T_TRAP,0,$53C9                  ; traps  - purple
+        dc.w    T_CHEST,0,$D6BF                 ; chests - copper
 enimg:
         dc.l    PIXBASE+(img_skull-pix_start), PIXBASE+(img_guard-pix_start), PIXBASE+(img_heavy-pix_start)
         dc.l    PIXBASE+(img_watcher-pix_start), PIXBASE+(img_wraith-pix_start)
+        dc.l    PIXBASE+(img_hound-pix_start)
+
+; castle voice: message id -> text (canon lines from original/index.html).
+; Drawing waits for a font object; tests and the debugger read VOICE_ID.
+voicetab:
+        dc.l    vt_none, vt_gateshut, vt_bricked, vt_jammed, vt_gateopen
+        dc.l    vt_dud, vt_alarm, vt_slam, vt_gift, vt_shard
+        dc.l    vt_empty, vt_traprun, vt_greedrun, vt_ceiling, vt_heavy
+        dc.l    vt_hound, vt_goleft, vt_goright, vt_lever, vt_rush
+        dc.l    vt_wait, vt_brace, vt_watch, vt_traps, vt_greed
+        dc.l    vt_exitmoved, vt_guardkill, vt_arrow, vt_spikes, vt_leverkill
+        dc.l    vt_chestkill, vt_crushed, vt_blade, vt_escaped, vt_noleave
+        dc.l    vt_longladder
+vt_none:        dc.b    0
+vt_gateshut:    dc.b    "THE GATE IS SHUT. FIND A LEVER.",0
+vt_bricked:     dc.b    "BRICKED UP. THE CASTLE CLOSED THIS WAY.",0
+vt_jammed:      dc.b    "IT IS JAMMED.",0
+vt_gateopen:    dc.b    "THE GATE IS ALREADY OPEN.",0
+vt_dud:         dc.b    "IT TURNS. NOTHING HAPPENS. TRY THE OTHER ONE.",0
+vt_alarm:       dc.b    "THE GATE OPENS. THE GUARD HEARD IT.",0
+vt_slam:        dc.b    "THE GATE SLAMS SHUT. THE CASTLE WILL NOT WAIT.",0
+vt_gift:        dc.b    "A MEMORY SHARD, LEFT FOR YOU.",0
+vt_shard:       dc.b    "A MEMORY SHARD.",0
+vt_empty:       dc.b    "EMPTY.",0
+vt_traprun:     dc.b    "...YOUR HAND. RUN.",0
+vt_greedrun:    dc.b    "...GREEDY HANDS. RUN.",0
+vt_ceiling:     dc.b    "...THE CEILING REMEMBERS YOU WAITING.",0
+vt_heavy:       dc.b    "THE HEAVY BRACES. AGAIN!",0
+vt_hound:       dc.b    "THE HOUND WILL NOT BE PUSHED.",0
+vt_goleft:      dc.b    "...YOU ALWAYS GO LEFT.",0
+vt_goright:     dc.b    "...YOU ALWAYS GO RIGHT.",0
+vt_lever:       dc.b    "...IT KNOWS WHICH LEVER YOU TRUST.",0
+vt_rush:        dc.b    "...YOU NEVER STOP TO LOOK.",0
+vt_wait:        dc.b    "...YOU LIKE TO WAIT.",0
+vt_brace:       dc.b    "...THE GUARDS HAVE FELT YOUR HANDS.",0
+vt_watch:       dc.b    "...THE GUARDS KNOW YOU SLIP PAST.",0
+vt_traps:       dc.b    "...THE SPIKES GREW FOR YOU.",0
+vt_greed:       dc.b    "...IT SAW YOU OPEN EVERY BOX.",0
+vt_exitmoved:   dc.b    "...THE WAY OUT HAS MOVED.",0
+vt_guardkill:   dc.b    "A GUARD CAUGHT YOU.",0
+vt_arrow:       dc.b    "AN ARROW.",0
+vt_spikes:      dc.b    "SPIKES.",0
+vt_leverkill:   dc.b    "THE LEVER YOU TRUSTED WAS A TRAP.",0
+vt_chestkill:   dc.b    "THE CHEST WAS A TRAP.",0
+vt_crushed:     dc.b    "THE CEILING CAME DOWN.",0
+vt_blade:       dc.b    "THE BLADE KEPT ITS RHYTHM.",0
+vt_escaped:     dc.b    "YOU ESCAPED. THE CASTLE WILL REMEMBER HOW.",0
+vt_noleave:     dc.b    "...IT WILL NOT LET YOU LEAVE SO EASILY.",0
+vt_longladder:  dc.b    "...THE OTHER WAY GOES HIGHER.",0
+        .even
 
 ; ============================================================
 ; ART (generated by tools/mkart.py)
