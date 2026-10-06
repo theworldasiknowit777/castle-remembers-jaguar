@@ -14,6 +14,15 @@
 | Gate 6 — Three-Floor Castle | ⏳ BUILT — awaiting runtime verification | Three floors, two enemies, ladder transitions, WIN state |
 | Gate 7 — Five-Floor Castle | ✅ PLAYABLE (branch `claude/gameplay-refinement`) — awaiting Bob low-level audit | Five floors, doors/levers/gates, 5 enemy types, spikes/eruption, full castle memory; 13/13 playtests, VJ-verified |
 
+## Binary safety (read before touching any .cof / .o / .abs)
+
+**Never use PowerShell 5.1 `>` redirection for binary Git output.** Use `git restore`,
+a binary-safe copy, or rebuild with RMAC/RLN. On 2026-10-05 a Gate 7 `.cof` written with
+`>` became UTF-16 text (header `FF FE`); Virtual Jaguar ran garbage and stopped with
+"Illegal instruction at $E00004". `jaguar-toolchain/tools/check_cof.py` now rejects any
+`.cof` that does not start `01 50` with entry `$802000`; the Gate 7 build script, the
+jagsim harness and `vj_drive.ps1` all run it.
+
 ## Gate 2 Summary
 
 - **Phase A bitmap PASS** — Object Processor BITMAP object renders correctly.

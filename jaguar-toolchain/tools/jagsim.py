@@ -103,6 +103,10 @@ class JagSim:
 
     # ---------------------------------------------------------------- loading
     def _load_cof(self, path):
+        from check_cof import check
+        problems = check(path)
+        if problems:
+            raise ValueError("refusing %s: %s" % (path, "; ".join(problems)))
         data = open(path, "rb").read()
         magic, nsect = struct.unpack(">HH", data[0:4])
         if magic != 0x0150:
