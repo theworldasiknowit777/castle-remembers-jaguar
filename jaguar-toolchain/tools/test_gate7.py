@@ -1110,10 +1110,19 @@ def _text_build(tag):
 
 
 def _reference_band(line1, line2, arg, glyphs, table, face, relief):
-    """What draw_text must produce: 320x20, centred, relief at (+1,+1) under the face."""
+    """What draw_text must produce: 320x20, centred, a dark backing plate behind each line
+    (the text plus TEXT_PLATE_PAD px either side, even-aligned, from one row above the glyphs),
+    then the relief at (+1,+1) under the face."""
     band = [[0] * 320 for _ in range(20)]
     for text, top in ((expand(line1, arg), 1), (expand(line2, arg), 11)):
+        if not text:
+            continue
         x0 = (320 - len(text) * 6) // 2
+        left = max(0, x0 - SYM["TEXT_PLATE_PAD"]) & ~1
+        right = min(320, (x0 + len(text) * 6 + SYM["TEXT_PLATE_PAD"] + 1) & ~1)
+        for r in range(top - 1, top - 1 + SYM["TEXT_PLATE_ROWS"]):
+            for x in range(left, right):
+                band[r][x] = SYM["TEXT_PLATE"]
         for col, off in ((relief, 1), (face, 0)):
             for k, ch in enumerate(text):
                 gi = table[ord(ch) & 0xFF]

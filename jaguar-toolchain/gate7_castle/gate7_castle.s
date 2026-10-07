@@ -136,6 +136,9 @@ FONT_ADV        equ     6               ; Kimi V6 contract: advance 6, pitch 10,
 FONT_PITCH      equ     10
 TEXT_CLR_ROWS   equ     4               ; per frame: clear 4 rows of the band...
 TEXT_PER_FRAME  equ     3               ; ...or draw 3 glyphs (bounded CPU per frame)
+TEXT_PLATE      equ     $9816           ; backing plate behind each line: Kimi's deep shadow (21,20,17)
+TEXT_PLATE_PAD  equ     4               ; px either side of the line's text
+TEXT_PLATE_ROWS equ     10              ; rows per line: the glyph rows plus its relief, one row of margin above
         .include "font_eq.inc"          ; KFONT_FACE / KFONT_RELIEF from Kimi's font_data.s
 
 OB_DATA         equ     0               ; long: DRAM address of pixels
@@ -3650,12 +3653,46 @@ text_start:
         addq.w  #1,d0
         bra.s   .cp
 .cpd:   clr.b   (a2)
-        mulu    #FONT_ADV,d0
+        mulu    #FONT_ADV,d0            ; d0 = the line's width in px
+        beq.s   .np                     ; an empty second line: nothing to centre or back
         move.w  #320,d1
         sub.w   d0,d1
         asr.w   #1,d1
         move.w  d1,MSG_DX(a5)
-        rts
+        ; backing plate: a dark slab behind the line, so the pale glyphs read over the
+        ; environment band. Drawn into TEXTBUF before the glyphs (same buffer, same
+        ; object); even-aligned so it fills with long writes.
+        move.w  d1,d3
+        subq.w  #TEXT_PLATE_PAD,d3      ; left edge
+        bpl.s   .pl
+        moveq   #0,d3
+.pl:    and.w   #$FFFE,d3
+        move.w  d1,d4
+        add.w   d0,d4
+        add.w   #TEXT_PLATE_PAD+1,d4    ; right edge (exclusive), rounded up to even
+        and.w   #$FFFE,d4
+        cmp.w   #320,d4
+        ble.s   .pr
+        move.w  #320,d4
+.pr:    sub.w   d3,d4
+        lsr.w   #1,d4
+        subq.w  #1,d4                   ; d4 = longs per row, less one
+        move.w  MSG_DTOP(a5),d5
+        subq.w  #1,d5                   ; one row above the glyphs
+        mulu    #640,d5
+        lea     TEXTBUF,a1
+        add.l   d5,a1
+        add.w   d3,d3
+        add.w   d3,a1                   ; (+ x * 2 bytes)
+        move.l  #((TEXT_PLATE<<16)|TEXT_PLATE),d6
+        moveq   #TEXT_PLATE_ROWS-1,d7
+.prow:  move.l  a1,a2
+        move.w  d4,d5
+.px:    move.l  d6,(a2)+
+        dbra    d5,.px
+        lea     640(a1),a1
+        dbra    d7,.prow
+.np:    rts
 
 ; text_glyph — d0 = byte, d1 = x, d2 = row, d3 = colour, d4 = offset
 text_glyph:
