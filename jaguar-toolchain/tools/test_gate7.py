@@ -1537,10 +1537,20 @@ def hero_facing(b):
         for r_, l_ in (("idleR", "idleL"), ("strideR", "strideL")):
             assert words[l_][y * 16:(y + 1) * 16] == tuple(reversed(words[r_][y * 16:(y + 1) * 16])), (l_, y)
     assert words["idleR"] != words["strideR"] and words["idleL"] != words["strideL"]
-    # the stride keeps the hero's own colours and fits his box: only Bob's palette, rows 0 (hood tip row is empty), feet on row 23
+    # the stride / climb frame keeps the hero's own colours and has the climbing shape
     bob = set(words["idleR"]) | {0}
-    assert set(words["strideR"]) <= bob, "stride frame uses a colour Bob's frame does not"
-    assert any(words["strideR"][23 * 16:24 * 16]) and not any(words["strideR"][0:16]), "feet on the last row, body down one row"
+    sr, sl = words["strideR"], words["strideL"]
+    px = lambda f, x, y: f[y * 16 + x]
+    assert set(sr) <= bob, "stride frame uses a colour Bob's frame does not"
+    assert sr[0] == 0 and sl[0] == 0 and sr[15] == 0 and sl[15] == 0, "transparent corners (background shows through)"
+    assert sum(1 for v in sr if v == 0) > 24 * 16 // 3, "mostly transparent"
+    assert any(px(sr, x, y) for x in (13, 14) for y in (6, 7)), "forward hand up at the right rail"
+    assert any(px(sr, x, y) for x in (1, 2) for y in (13, 14)), "low hand out at the left rail"
+    assert not any(px(sr, x, 23) for x in range(8)) and any(px(sr, x, 23) for x in range(8, 16)), "one foot planted, the other tucked up"
+    assert any(px(sr, x, 21) for x in (3, 4, 5)) and not any(px(sr, x, 22) for x in range(8)), "raised foot two rows up"
+    assert any(px(sl, x, y) for x in (1, 2) for y in (6, 7)), "mirrored: forward hand up at the left rail"
+    assert any(px(sl, x, y) for x in (13, 14) for y in (13, 14)), "mirrored: low hand at the right rail"
+    assert all(not any(px(w, x, y) for y in range(24) for x in (0, 15)) for w in (sr, sl, words["idleR"], words["idleL"])),         "nothing outside the 14 px the hitbox allows for"
     seen_f = set()
     n = 0
     for pad in ({"left"}, {"left"}, set(), {"right"}, {"right"}, {"right"}, set(), {"left"}, {"left"}, {"left", "right"}, {"right"}, set()):

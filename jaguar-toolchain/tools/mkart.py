@@ -644,24 +644,40 @@ def mirrored(words, w=16, h=24):
 
 
 def stride_words(words, w=16, h=24):
-    """The walking / climbing frame, derived from Bob's: the body (rows 0-18) drops one row,
-    and the legs spread, both feet planted: a wide stance with hips still joined. The leg
-    colours are Bob's own (thigh row 19, shin rows 21-22, boot sole row 23)."""
+    """The shared walking / jumping / ladder-climbing frame, derived from Bob's. Opposite arm and
+    leg, so it reads as a stride on the ground and as hand-over-hand on a ladder (the ladder's
+    rails are x 0-2 and 13-15, rungs between):
+      - right (forward) arm reaches up, the hand at the right rail beside the head;
+      - left hand grips low, out at the left rail;
+      - left knee up: thigh out, the foot tucked two rows above the planted right foot.
+    The mirrored frame swaps sides, so the pair alternates as a climb. Every colour is Bob's."""
     Z = "0000"
+    skin, hi = words[3 * w + 7], words[7 * w + 10]          # his skin and its highlight
+    line = words[5 * w + 8]                                  # his black outline
     thigh, shin, sole = words[19 * w + 6], words[21 * w + 6], words[23 * w + 5]
-    img = [[Z] * w for _ in range(h)]
-    for y in range(19):                                  # torso and head: down one row
-        for x in range(w):
-            img[y + 1][x] = words[y * w + x]
-    legs = {                                             # row: (back-leg xs, front-leg xs, colour)
-        20: ((5, 6), (10, 11), thigh),
-        21: ((4, 5), (11, 12), shin),
-        22: ((3, 4, 5), (11, 12, 13), shin),
-        23: ((3, 4, 5), (11, 12, 13), sole),
-    }
-    for y, (back, front, c) in legs.items():
-        for x in back + front:
-            img[y][x] = c
+    img = [list(words[y * w:(y + 1) * w]) for y in range(h)]
+    for y in range(12, 16):                                  # the forward arm leaves the torso edge
+        img[y][12] = line
+    for x, y in ((12, 11), (13, 11), (12, 10), (13, 10),     # reaching up: a 2 px arm, stepping out
+                 (13, 9), (14, 9), (13, 8), (14, 8)):
+        img[y][x] = skin
+    for x, y in ((13, 6), (14, 6), (13, 7), (14, 7)):        # hand on the rail
+        img[y][x] = hi
+    for x, y in ((1, 13), (2, 13), (1, 14), (2, 14)):        # low hand on the other rail
+        img[y][x] = skin
+    for y in range(19, 24):                                  # legs: redrawn
+        img[y] = [Z] * w
+    for x in (4, 5, 6, 7):
+        img[19][x] = thigh                                   # raised thigh, out to the left
+    for x in (9, 10):                                        # planted leg
+        img[19][x] = img[20][x] = thigh
+        img[21][x] = shin
+    for x in (3, 4, 5):
+        img[20][x] = shin                                    # the foot tucked up: boot ...
+        img[21][x] = sole                                    # ... sole on a rung, two rows above the planted foot
+    for x in (9, 10, 11):
+        img[22][x] = shin
+        img[23][x] = sole                                    # planted boot on the floor row
     return [v for row in img for v in row]
 
 

@@ -189,7 +189,7 @@ swinging blade, the Castle Hound, and castle-voice state.
 1. **Castle-voice rendering:** done; enabled in the normal build after Bob's Checkpoint B.
 2. **Kimi art merge:** 21 slots automatic; the ladder (16×244) and the 6 new slots in §5.
 3. **Environment bands** (Bob C).
-4. **Hero art:** four frames, all 16×24 and all derived from Bob's: idle facing right / left and a stride facing right / left. Standing, walking (a step every 8 px), jumping and climbing (strides alternate) all use them. Kimi's own walk and climb frames would replace those four slots.
+4. **Hero art:** four frames, all 16×24 and all derived from Bob's: idle facing right / left and a shared stride / ladder-climb pose facing right / left (hands on the rails, one knee tucked). Standing, walking (a step every 8 px), jumping and climbing (strides alternate) all use them. Kimi's own walk and climb frames would replace those four slots.
 5. **Audio / EEPROM memory:** Bob.
 
 **Deferred low-level items for the final Bob return:**
