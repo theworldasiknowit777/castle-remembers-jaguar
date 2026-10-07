@@ -359,7 +359,8 @@ MSG_DROW        equ     MSG_DPH+2       ; next row to clear
 MSG_DI          equ     MSG_DROW+2      ; next glyph of MSG_SCR
 MSG_DX          equ     MSG_DI+2        ; its x
 MSG_DTOP        equ     MSG_DX+2        ; its line's top row
-STATE_SIZE      equ     MSG_DTOP+2
+HEROSET         equ     MSG_DTOP+2      ; which pair the two hero stride slots hold: 0 stride, 1 ladder climb
+STATE_SIZE      equ     HEROSET+2
 
 
 ; ============================================================
@@ -467,6 +468,7 @@ main:
         blt.s   .wait_blank             ; it raw and refreshed every 2nd frame)
         bsr     copy_list
         move.w  BGVAL(a5),BG
+        bsr     hero_sync               ; (still in the blank: the OP is not reading)
 
         bsr     game_frame
         bsr     set_objects
@@ -483,6 +485,34 @@ main:
         cmp.w   #VC_VDE,d0
         bge.s   .wait_new
         bra     main
+
+; ============================================================
+; hero_sync — the two hero "stride" slots (img_hero_walk, img_hero_walk_l, 1,536 B) hold the
+;   walking stride on the ground and the original's back-view ladder frames on a ladder
+;   (hero_climb_pair, in ROM). The hero never needs both at once, so the swap needs no extra
+;   DRAM. It runs right after copy_list at the start of the blank, when the Object Processor
+;   is not reading; HEROSET follows CLIMB as set_objects last saw it, so the list just copied
+;   and the slot contents always agree. A copy happens only on mounting or dismounting.
+; ============================================================
+hero_sync:
+        moveq   #0,d0
+        tst.w   CLIMB(a5)
+        beq.s   .hsw
+        moveq   #1,d0
+.hsw:         cmp.w   HEROSET(a5),d0
+        beq.s   .hsr
+        move.w  d0,HEROSET(a5)
+        lea     img_hero_walk,a1        ; (the ROM copy of the stride pair)
+        tst.w   d0
+        beq.s   .hsc
+        lea     hero_climb_pair,a1
+.hsc:   lea     PIXBASE+(img_hero_walk-pix_start),a0
+        move.w  #(1536/32)-1,d1
+.hsl:   movem.l (a1)+,d2-d7/a2-a3
+        movem.l d2-d7/a2-a3,(a0)
+        lea     32(a0),a0
+        dbra    d1,.hsl
+.hsr:   rts
 
 ; ============================================================
 ; copy_list — SHADOW -> LIVE, NOBJ headers (STOP is static)

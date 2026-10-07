@@ -1537,20 +1537,10 @@ def hero_facing(b):
         for r_, l_ in (("idleR", "idleL"), ("strideR", "strideL")):
             assert words[l_][y * 16:(y + 1) * 16] == tuple(reversed(words[r_][y * 16:(y + 1) * 16])), (l_, y)
     assert words["idleR"] != words["strideR"] and words["idleL"] != words["strideL"]
-    # the stride / climb frame keeps the hero's own colours and has the climbing shape
+    # the walking stride keeps the hero's own colours: the body a row lower, the legs spread, both feet planted
     bob = set(words["idleR"]) | {0}
-    sr, sl = words["strideR"], words["strideL"]
-    px = lambda f, x, y: f[y * 16 + x]
-    assert set(sr) <= bob, "stride frame uses a colour Bob's frame does not"
-    assert sr[0] == 0 and sl[0] == 0 and sr[15] == 0 and sl[15] == 0, "transparent corners (background shows through)"
-    assert sum(1 for v in sr if v == 0) > 24 * 16 // 3, "mostly transparent"
-    assert any(px(sr, x, y) for x in (13, 14) for y in (6, 7)), "forward hand up at the right rail"
-    assert any(px(sr, x, y) for x in (1, 2) for y in (13, 14)), "low hand out at the left rail"
-    assert not any(px(sr, x, 23) for x in range(8)) and any(px(sr, x, 23) for x in range(8, 16)), "one foot planted, the other tucked up"
-    assert any(px(sr, x, 21) for x in (3, 4, 5)) and not any(px(sr, x, 22) for x in range(8)), "raised foot two rows up"
-    assert any(px(sl, x, y) for x in (1, 2) for y in (6, 7)), "mirrored: forward hand up at the left rail"
-    assert any(px(sl, x, y) for x in (13, 14) for y in (13, 14)), "mirrored: low hand at the right rail"
-    assert all(not any(px(w, x, y) for y in range(24) for x in (0, 15)) for w in (sr, sl, words["idleR"], words["idleL"])),         "nothing outside the 14 px the hitbox allows for"
+    assert set(words["strideR"]) <= bob, "stride frame uses a colour Bob's frame does not"
+    assert any(words["strideR"][23 * 16:24 * 16]) and not any(words["strideR"][0:16]), "feet on the last row, body down one row"
     seen_f = set()
     n = 0
     for pad in ({"left"}, {"left"}, set(), {"right"}, {"right"}, {"right"}, set(), {"left"}, {"left"}, {"left", "right"}, {"right"}, set()):
@@ -1568,39 +1558,71 @@ def hero_facing(b):
         assert r["data"] == _hero_expect(r, fr), r
     assert seen_f == set(fr.values()), "every frame should have been shown (walk left and right, idle)"
     assert any(air for air, _ in jump) and all(st for air, st in jump if air), jump
-    print("   4 frames (right/left idle + stride, exact mirrors, Bob's palette); rule verified on %d frames incl. a jump" % (n + len(jump)))
+    print("   4 frames (right/left idle + walking stride, exact mirrors, Bob's palette); rule verified on %d frames incl. a jump" % (n + len(jump)))
+
+
+def _climb_expected():
+    """The original game's back-view ladder frames (hero_climb1, hero_climb2) in Bob's palette, as words."""
+    import mkart
+    src = open(os.path.join(ROOT, "gate6_castle", "gate6_castle.s"), encoding="utf-8", errors="replace").read()
+    hero = mkart.hero_words(mkart.bob_block(src, "hero_pixels"))
+    cw = [int(w, 16) for w in mkart.climb_words(hero)]
+    return tuple(cw[:384]), tuple(cw[384:]), {k: int(hero[i], 16) for k, i in (("hair", 6), ("cloak", 10 * 16 + 4), ("skin", 3 * 16 + 7), ("skinhi", 7 * 16 + 10))}
 
 
 @scenario
 def hero_climb(b):
-    """On a ladder the hero alternates the two strides every 16 halflines of travel (opposite limbs), and holds still when it stops."""
-    fr, _ = _hero_frames(b)
+    """Climbing shows the hero from behind (the original's frames), swapped into the stride slots at mount, alternating every 16 halflines, restored on dismount."""
+    import struct
+    fr, words = _hero_frames(b)
+    c1, c2, col = _climb_expected()
+    slot = lambda k: struct.unpack(">384H", bytes(b.s.uc.mem_read(fr[k], 768)))
+    assert slot("strideR") == words["strideR"] and slot("strideL") == words["strideL"]
+    # the back view itself: a hood and no face, the cloak across the back, hands out at both rails
+    for f in (c1, c2):
+        head = {f[y * 16 + x] for y in range(3, 8) for x in range(4, 12)}
+        assert head <= {col["hair"], 0}, "the back of a head shows no face: %s" % head
+        assert sum(1 for y in range(10, 18) for x in range(4, 12) if f[y * 16 + x] == col["cloak"]) >= 40, "cloak across the back"
+        assert any(f[y * 16 + x] for y in range(2, 14) for x in (1, 2)) and any(f[y * 16 + x] for y in range(2, 14) for x in (13, 14)), "an arm out to each rail"
+        assert not any(f[y * 16] or f[y * 16 + 15] for y in range(24)), "nothing in the outer columns"
+    assert c1 != c2 and c1 != words["strideR"] and c2 != words["strideL"]
     b.choice_floor(0, "L")                               # through the door to the left ladder foot
     b.wait_safe_climb()
-    assert b.v("CLIMB") == 0 and b.v("HX") == LAD["L"]
+    assert b.v("CLIMB") == 0 and b.v("HX") == LAD["L"] and b.s.w(S + SYM["HEROSET"]) == 0
     flips = trace = 0
     last = None
-    for _ in range(14):                                  # climbing up: the frame is a function of HY alone
+    for _ in range(16):                                  # climbing up
         r = _hero_probe(b, {"up"})
-        if r["climb"]:
+        heroset = b.s.w(S + SYM["HEROSET"])
+        content = (slot("strideR"), slot("strideL"))
+        assert content == ((c1, c2) if heroset else (words["strideR"], words["strideL"])), "slots hold a mix of the two sets"
+        # (read at the end of the frame, after that frame's blank: the swap has already followed the CLIMB the logic left)
+        assert heroset == (1 if r["climb"] else 0), (heroset, r["climb"])
+        if r["climb"] and heroset:
             trace += 1
-            assert r["data"] == fr["strideL" if (r["hy"] >> 4) & 1 else "strideR"], (r, {k: hex(v) for k, v in fr.items()})
+            want = fr["strideL" if (r["hy"] >> 4) & 1 else "strideR"]
+            assert r["data"] == want, (r, {k: hex(v) for k, v in fr.items()})
+            shown = slot("strideL" if (r["hy"] >> 4) & 1 else "strideR")
+            assert shown == (c2 if (r["hy"] >> 4) & 1 else c1), "the frame on show is the back view"
             flips += last is not None and r["data"] != last
             last = r["data"]
     assert trace >= 10 and flips >= 2, (trace, flips)
     held = {_hero_probe(b, set())["data"] for _ in range(20)}               # let go: frozen, no flicker
     assert len(held) == 1, held
+    assert b.s.w(S + SYM["HEROSET"]) == 1 and (slot("strideR"), slot("strideL")) == (c1, c2)
     hy0 = b.v("HY")
     for _ in range(14):                                  # climbing back down: still a function of HY
         r = _hero_probe(b, {"down"})
-        if r["climb"]:
+        if r["climb"] and b.s.w(S + SYM["HEROSET"]):
             assert r["data"] == fr["strideL" if (r["hy"] >> 4) & 1 else "strideR"], r
     assert b.v("HY") > hy0
-    b.climb("up")                                        # off the ladder, onto F2: back to the walking frames
-    for _ in range(3):
+    b.climb("up")                                        # off the ladder, onto F2
+    for _ in range(4):
         r = _hero_probe(b, set())
-    assert r["climb"] == 0 and r["data"] == _hero_expect(r, fr), r
-    print("   %d climbing frames, %d stride flips, still when still, standing frame restored after the climb" % (trace, flips))
+    assert r["climb"] == 0 and b.s.w(S + SYM["HEROSET"]) == 0, "dismounted: the stride pair is back"
+    assert (slot("strideR"), slot("strideL")) == (words["strideR"], words["strideL"]), "stride frames restored"
+    assert r["data"] == _hero_expect(r, fr), r
+    print("   %d climbing frames from behind (the original's hero_climb1/2), %d flips, still when still, stride pair restored on dismount" % (trace, flips))
 
 
 @scenario
