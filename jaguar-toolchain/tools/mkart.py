@@ -621,8 +621,8 @@ def check_bands():
     return BAND_FILES
 
 
-def mirror_rows(block, w, h):
-    """Bob's hero block (dc.l / dc.w text) -> the same image mirrored left-right, as dc.w lines."""
+def hero_words(block, w=16, h=24):
+    """Bob's hero block (dc.l / dc.w text) -> a flat list of 4-digit hex words."""
     words = []
     for ln in block.splitlines():
         code = ln.split(";")[0]
@@ -633,10 +633,40 @@ def mirror_rows(block, w, h):
             words += re.findall(r"\$([0-9A-Fa-f]{4})(?![0-9A-Fa-f])", code)
     if len(words) != w * h:
         raise SystemExit("mkart: hero block has %d words, expected %d" % (len(words), w * h))
+    return words
+
+
+def mirrored(words, w=16, h=24):
     out = []
     for y in range(h):
         out += list(reversed(words[y * w:(y + 1) * w]))
-    return ["        dc.w    " + ",".join("$" + x.upper() for x in out[i:i + 8]) for i in range(0, len(out), 8)]
+    return out
+
+
+def stride_words(words, w=16, h=24):
+    """The walking / climbing frame, derived from Bob's: the body (rows 0-18) drops one row,
+    and the legs spread, both feet planted: a wide stance with hips still joined. The leg
+    colours are Bob's own (thigh row 19, shin rows 21-22, boot sole row 23)."""
+    Z = "0000"
+    thigh, shin, sole = words[19 * w + 6], words[21 * w + 6], words[23 * w + 5]
+    img = [[Z] * w for _ in range(h)]
+    for y in range(19):                                  # torso and head: down one row
+        for x in range(w):
+            img[y + 1][x] = words[y * w + x]
+    legs = {                                             # row: (back-leg xs, front-leg xs, colour)
+        20: ((5, 6), (10, 11), thigh),
+        21: ((4, 5), (11, 12), shin),
+        22: ((3, 4, 5), (11, 12, 13), shin),
+        23: ((3, 4, 5), (11, 12, 13), sole),
+    }
+    for y, (back, front, c) in legs.items():
+        for x in back + front:
+            img[y][x] = c
+    return [v for row in img for v in row]
+
+
+def as_dcw(words):
+    return ["        dc.w    " + ",".join("$" + x.upper() for x in words[i:i + 8]) for i in range(0, len(words), 8)]
 
 
 def emit_bands(out_dir):
@@ -708,11 +738,16 @@ def emit():
         o.append("img_%s:\t\t\t\t; %dx%d (Kimi %s)" % (name, w, h, fname))
         o.extend(vendored[name])
     # left-facing hero: derived from Bob's authentic frame (img_hero itself is left as Bob wrote it)
-    o.append("img_hero_l:\t\t\t\t; 16x24 (mirror of Bob's img_hero, generated)")
-    o.extend(mirror_rows(bob_block(src, "hero_pixels"), 16, 24))
+    hero = hero_words(bob_block(src, "hero_pixels"))
+    stride = stride_words(hero)
+    for lbl, note, words in (("img_hero_l", "mirror of Bob's img_hero", mirrored(hero)),
+                             ("img_hero_walk", "walking / climbing stride, derived from Bob's frame", stride),
+                             ("img_hero_walk_l", "mirror of img_hero_walk", mirrored(stride))):
+        o.append("%s:\t\t\t\t; 16x24 (%s, generated)" % (lbl, note))
+        o.extend(as_dcw(words))
     o.append("pix_end:")
     # exact size of the art block (for the memory-map guards in test_gate7.py)
-    art_words = 320 * 8 + 16 * 16 + 16 * 24 + sum(len(r[0]) * len(r) for r in IMAGES.values()) +         sum(KIMI_VENDORED[n][1] * KIMI_VENDORED[n][2] for n in VENDORED_ONLY) + 16 * 24      # + img_hero_l
+    art_words = 320 * 8 + 16 * 16 + 16 * 24 + sum(len(r[0]) * len(r) for r in IMAGES.values()) +         sum(KIMI_VENDORED[n][1] * KIMI_VENDORED[n][2] for n in VENDORED_ONLY) + 3 * 16 * 24      # + img_hero_l, img_hero_walk, img_hero_walk_l
     o.append("ART_BYTES        equ     %d" % (art_words * 2))
     o.append("")
     out_dir = os.path.join(ROOT, "gate7_castle")

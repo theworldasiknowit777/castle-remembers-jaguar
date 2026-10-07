@@ -3285,18 +3285,33 @@ set_objects:
 .na:
         ; ---- hero (Bob's sprite) -------------------------------
         lea     O_HERO*16(a4),a1
-        ; Facing: Bob's frame faces right, img_hero_l (its mirror) left. Climbing swaps
-        ; them every 16 halflines of travel, so the hero works up the ladder hand over
-        ; hand and stops when it stops. Presentation only: it reads FACING, CLIMB, HY.
-        move.l  #PIXBASE+(img_hero-pix_start),d0
+        ; Frames (all 16x24): img_hero (Bob's, faces right) / img_hero_l (its mirror) when
+        ; standing, img_hero_walk / img_hero_walk_l (legs spread) mid-stride. Walking steps
+        ; every 8 px of travel; a jump holds the stride; a ladder alternates the two
+        ; strides every 16 halflines of climb (opposite limbs) and holds still when the
+        ; climb does. Presentation only: reads FACING, CLIMB, HY, HX and PAD.
         tst.w   CLIMB(a5)
-        beq.s   .hfc
+        beq.s   .hnc
         btst    #4,HY+1(a5)
-        beq.s   .hfd
-        bra.s   .hfl
-.hfc:   tst.w   FACING(a5)
+        bne.s   .hsl
+        bra.s   .hsr
+.hnc:   cmp.w   #GROUND_Y,HY(a5)        ; in the air: stride
+        bne.s   .hst
+        move.w  PAD(a5),d0
+        and.w   #(1<<P_LEFT)|(1<<P_RIGHT),d0
+        beq.s   .hid                    ; no direction held: standing
+        btst    #3,HX+1(a5)             ; walking: step every 8 px
+        beq.s   .hid
+.hst:   tst.w   FACING(a5)
+        bpl.s   .hsr
+.hsl:   move.l  #PIXBASE+(img_hero_walk_l-pix_start),d0
+        bra.s   .hfd
+.hsr:   move.l  #PIXBASE+(img_hero_walk-pix_start),d0
+        bra.s   .hfd
+.hid:   move.l  #PIXBASE+(img_hero-pix_start),d0
+        tst.w   FACING(a5)
         bpl.s   .hfd
-.hfl:   move.l  #PIXBASE+(img_hero_l-pix_start),d0
+        move.l  #PIXBASE+(img_hero_l-pix_start),d0
 .hfd:   move.l  d0,OB_DATA(a1)
         move.w  HX(a5),OB_X(a1)
         move.w  HY(a5),OB_Y(a1)

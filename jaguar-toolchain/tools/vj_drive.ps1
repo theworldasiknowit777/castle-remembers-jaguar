@@ -4,6 +4,7 @@
 #   hold:<key>:<ms>   hold a key (Z C S X L ...) for ms
 #   tap:<key>         press and release
 #   shot:<name>       save <Out>\<name>.png of the emulator window
+#   holdshot:<key>:<ms>:<name>   hold a key for ms, screenshot while it is still down, release
 param(
     [Parameter(Mandatory = $true)][string]$Rom,
     [Parameter(Mandatory = $true)][string]$Out,
@@ -71,6 +72,7 @@ foreach ($step in $Script.Split(';')) {
         "hold" { Focus; Key $a[1] $true; Start-Sleep -Milliseconds ([int]$a[2]); Key $a[1] $false }
         "tap"  { Focus; Key $a[1] $true; Start-Sleep -Milliseconds 80; Key $a[1] $false; Start-Sleep -Milliseconds 80 }
         "shot" { Focus; Shot $a[1] }
+        "holdshot" { Focus; Key $a[1] $true; Start-Sleep -Milliseconds ([int]$a[2]); Shot $a[3]; Key $a[1] $false }
         "burst" { Focus; for ($n = 0; $n -lt [int]$a[2]; $n++) { Shot ("{0}_{1}" -f $a[1], $n); Start-Sleep -Milliseconds 120 } }
     }
 }

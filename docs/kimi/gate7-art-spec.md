@@ -76,5 +76,5 @@ The five-floor build runs on placeholder art drawn as ASCII maps in
 
 ## Wanted next (no code dependency; drop them in as maps or PNGs)
 
-- Hero walk frames (2–4 × 16×24) and a climb frame. Until they arrive the game draws Bob's frame facing right and its generated mirror (`img_hero_l`) facing left, and alternates the two while climbing. Kimi's frames would replace those two slots (same 16×24, same hitbox).
+- Hero walk frames (2–4 × 16×24) and a climb frame. Until they arrive the game uses four frames derived from Bob's: `img_hero` (his) and `img_hero_l` (its mirror) standing, and `img_hero_walk` / `img_hero_walk_l` (body down a row, legs spread, his own colours) for walking, jumping and climbing. Kimi's frames would replace those four slots (same 16×24, same hitbox).
 - Floor-specific wall backdrops. This needs a new background object, so tell Claude the size first; the DRAM budget is fine.
