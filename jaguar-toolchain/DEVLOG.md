@@ -1171,3 +1171,19 @@ Bob approved one opaque 320×180 CRY16 band behind everything, the data pointer 
 - **Test builds that start on F3 or F5 show the F1 title.** This is a test-setup artefact; normal play is not affected.
 
 A dark plate drawn behind the message band would fix the first three, and the third would also stop the carving being overlapped. It is a small CPU-side change in `draw_text`, not an architecture change, and is left for a decision.
+
+### Gate 7 hero facing + climb (presentation only)
+
+- **Before:** the game tracked `FACING` and `CLIMB` but always drew Bob's single frame.
+- **Art:** no hero facing or climb art exists yet (Kimi's spec lists walk frames and a climb frame as "wanted next"). Bob's frame reads as facing right: the cape trails on the left, which matches the default `FACING` of 1. `mkart.py` generates `img_hero_l`, the exact pixel mirror of Bob's `img_hero` (+768 B; the art now ends at `$19840`, below `TEXTBUF`). `img_hero` itself is untouched.
+- **Code:** one block in `set_objects`, writing the hero object's `OB_DATA`:
+  - walking or standing: `img_hero_l` when `FACING` is negative, otherwise `img_hero`;
+  - climbing (`CLIMB` ≠ 0): the two frames alternate every 16 halflines of vertical travel (bit 4 of `HY`), so the hero works up the ladder hand over hand, stays on one frame when it stops, and goes back to its facing frame after dismounting.
+- **No new object, `NOBJ`, LINK, buffer or state field.** The block only reads `FACING`, `CLIMB` and `HY`.
+- **Tests:**
+  - `hero_facing`: the left frame is the exact mirror of Bob's frame, and the sprite follows `FACING` through eight inputs (left, right, idle, both).
+  - `hero_climb`: while climbing the frame is a function of `HY` alone, flips happen, it is frozen when the hero stops, and the walking frame is restored after the climb.
+  - `hero_no_gameplay_effect`: settled gameplay state is identical to the pre-change build `cfbad1b` over 1,820 frames.
+- **VJ:** the cape trails left walking right and right walking left; on the ladder it alternates sides as the hero rises and freezes when the hero stops (evidence in `v7_evidence/hero_*`).
+- **Test-harness note:** the hero object is written after the frame's logic, and the logic that completes early in a frame reads the previous frame's pad. Probes therefore hold each input for two frames.
+- **For Kimi's art, later:** her walk frames and climb frame (16×24, same hitbox) would replace `img_hero` / `img_hero_l`; the pointer selection stays the same.

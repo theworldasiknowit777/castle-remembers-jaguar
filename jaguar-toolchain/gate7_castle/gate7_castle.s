@@ -3285,7 +3285,19 @@ set_objects:
 .na:
         ; ---- hero (Bob's sprite) -------------------------------
         lea     O_HERO*16(a4),a1
-        move.l  #PIXBASE+(img_hero-pix_start),OB_DATA(a1)
+        ; Facing: Bob's frame faces right, img_hero_l (its mirror) left. Climbing swaps
+        ; them every 16 halflines of travel, so the hero works up the ladder hand over
+        ; hand and stops when it stops. Presentation only: it reads FACING, CLIMB, HY.
+        move.l  #PIXBASE+(img_hero-pix_start),d0
+        tst.w   CLIMB(a5)
+        beq.s   .hfc
+        btst    #4,HY+1(a5)
+        beq.s   .hfd
+        bra.s   .hfl
+.hfc:   tst.w   FACING(a5)
+        bpl.s   .hfd
+.hfl:   move.l  #PIXBASE+(img_hero_l-pix_start),d0
+.hfd:   move.l  d0,OB_DATA(a1)
         move.w  HX(a5),OB_X(a1)
         move.w  HY(a5),OB_Y(a1)
         move.w  #4,OB_W(a1)

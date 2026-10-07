@@ -1405,14 +1405,16 @@ def band_floors(b):
     print("   floors %s: band pointer + pixels correct on each; all five bands unmodified after the run" % [x + 1 for x in seen])
 
 
-def _baseline_cof():
-    """The pre-band build (BAND_REF) assembled from git into the temp dir."""
+def _baseline_cof(ref=None):
+    """The build of git ref `ref` (default: the pre-band BAND_REF) assembled into the temp dir."""
     import subprocess, tempfile
-    tmp = os.path.join(tempfile.gettempdir(), "g7_base_" + BAND_REF)
+    ref = ref or BAND_REF
+    tmp = os.path.join(tempfile.gettempdir(), "g7_base_" + ref)
     cof = os.path.join(tmp, "base.cof")
     if not os.path.exists(cof):
         os.makedirs(tmp, exist_ok=True)
-        tar = subprocess.run(["git", "-C", os.path.dirname(ROOT), "archive", BAND_REF, "jaguar-toolchain/gate7_castle"],
+        tar = subprocess.run(["git", "-C", os.path.dirname(ROOT), "archive", ref, "jaguar-toolchain/gate7_castle",
+                              "jaguar-toolchain/kimi_sprites"],
                              capture_output=True, check=True).stdout
         import io, tarfile
         tarfile.open(fileobj=io.BytesIO(tar)).extractall(tmp)
@@ -1423,12 +1425,11 @@ def _baseline_cof():
     return cof
 
 
-@scenario
-def band_no_gameplay_effect(b):
-    """Gameplay is untouched by the bands: same input, same settled gameplay state every frame as the pre-band build."""
+def _same_gameplay(ref):
+    """Same input -> the same settled gameplay state every frame as the build of git ref `ref`."""
     from soak_gate7 import find_wait_blank
     old = Bot.__new__(Bot)
-    old.s, old.name, old.shots = JagSim(_baseline_cof()), "old", 0
+    old.s, old.name, old.shots = JagSim(_baseline_cof(ref)), "old", 0
     old.s.boot_wait()
     new = Bot("new")
     lp = [find_wait_blank(x.s) for x in (old, new)]
@@ -1446,8 +1447,111 @@ def band_no_gameplay_effect(b):
                 continue
             compared += 1
             diff = [i for i in range(hi) if st[0][i] != st[1][i]]
-            assert not diff, "gameplay state diverged from %s at frame %d (offset %d)" % (BAND_REF, frame, diff[0])
-    print("   %d frames vs %s, settled gameplay state identical (%d bytes, %d frames compared)" % (frame, BAND_REF, hi, compared))
+            assert not diff, "gameplay state diverged from %s at frame %d (offset %d)" % (ref, frame, diff[0])
+    print("   %d frames vs %s, settled gameplay state identical (%d bytes, %d frames compared)" % (frame, ref, hi, compared))
+
+
+@scenario
+def band_no_gameplay_effect(b):
+    """Gameplay is untouched by the bands: same input, same settled gameplay state every frame as the pre-band build."""
+    _same_gameplay(BAND_REF)
+
+
+# ---------------------------------------------------------------- hero facing + climb (presentation only)
+HERO_REF = "cfbad1b"                                  # the band build: hero art was one frame, facing/climb not drawn
+
+
+@scenario
+def hero_no_gameplay_effect(b):
+    """Hero facing and climb frames are presentation only: gameplay state identical to the build before them."""
+    _same_gameplay(HERO_REF)
+
+
+def _hero_probe(b, pad):
+    """Run one frame; return what the hero object says once that frame's logic and list build are done."""
+    from soak_gate7 import find_wait_blank
+    from jagsim import HALFLINES_PER_FRAME
+    sim = b.s
+    lo, hi = find_wait_blank(sim)
+    sim.pad = set(pad)
+    vdb, vde = sim.io_w(0x46), sim.io_w(0x48)
+    got = None
+    for hl in range(HALFLINES_PER_FRAME):
+        sim.vc = hl
+        if vdb <= hl < vde and hl % 2 == 0 and sim.olp_valid():
+            sim._op_line(hl)
+        sim._run_halfline()
+        if got is None and hl < 507 and lo <= sim.pc < hi:
+            got = dict(data=sim.l(SYM["OBJS"] + SYM["O_HERO"] * 16 + SYM["OB_DATA"]), hy=sim.sw(S + SYM["HY"]),
+                       climb=sim.sw(S + SYM["CLIMB"]), facing=sim.sw(S + SYM["FACING"]), hx=sim.sw(S + SYM["HX"]))
+    sim.frame += 1
+    return got
+
+
+def _hero_frames(b):
+    """(right-facing, left-facing) frame addresses as the game uses them, and their pixel words."""
+    import struct
+    seen = {}
+    for pad, key in (({"left"}, "L"), ({"right"}, "R")):
+        for _ in range(4):
+            r = _hero_probe(b, pad)
+        seen[key] = r["data"]
+    words = {k: struct.unpack(">%dH" % (16 * 24), bytes(b.s.uc.mem_read(a, 16 * 24 * 2))) for k, a in seen.items()}
+    return seen, words
+
+
+@scenario
+def hero_facing(b):
+    """The hero faces the way it last walked: Bob's frame for right, its exact mirror for left."""
+    seen, words = _hero_frames(b)
+    assert seen["L"] != seen["R"], "walking left and right must use different frames"
+    for y in range(24):                                  # left frame == mirror of Bob's frame, row for row
+        assert words["L"][y * 16:(y + 1) * 16] == tuple(reversed(words["R"][y * 16:(y + 1) * 16])), y
+    assert any(words["R"]) and words["L"] != words["R"]
+    got = []
+    for pad, want in (({"left"}, "L"), (set(), "L"), (set(), "L"), ({"right"}, "R"), (set(), "R"), ({"left"}, "L"),
+                      ({"right"}, "R"), ({"left", "right"}, None)):
+        _hero_probe(b, pad)                               # (the logic that finishes in a frame read the previous frame's pad)
+        r = _hero_probe(b, pad)
+        got.append((sorted(pad), r["facing"], "L" if r["data"] == seen["L"] else "R" if r["data"] == seen["R"] else "?"))
+        if want:
+            assert got[-1][2] == want, got[-1]
+        assert got[-1][2] != "?", got[-1]
+        assert (r["facing"] < 0) == (got[-1][2] == "L"), got[-1]         # the sprite always follows FACING
+    print("   right frame $%X, left frame $%X (exact mirror); follows FACING through %d inputs" % (seen["R"], seen["L"], len(got)))
+
+
+@scenario
+def hero_climb(b):
+    """On a ladder the hero alternates the two frames every 16 halflines of travel (hand over hand), and holds still when it stops."""
+    seen, _ = _hero_frames(b)
+    b.choice_floor(0, "L")                               # through the door to the left ladder foot
+    b.wait_safe_climb()
+    assert b.v("CLIMB") == 0 and b.v("HX") == LAD["L"]
+    flips = trace = 0
+    last = None
+    for _ in range(14):                                  # climbing up: the frame is a function of HY alone
+        r = _hero_probe(b, {"up"})
+        if r["climb"]:
+            trace += 1
+            want = seen["L"] if (r["hy"] >> 4) & 1 else seen["R"]
+            assert r["data"] == want, (r, hex(want))
+            flips += last is not None and r["data"] != last
+            last = r["data"]
+    assert trace >= 10 and flips >= 2, (trace, flips)
+    held = {_hero_probe(b, set())["data"] for _ in range(20)}               # let go: frozen, no flicker
+    assert len(held) == 1, held
+    hy0 = b.v("HY")
+    for _ in range(14):                                  # climbing back down: still a function of HY
+        r = _hero_probe(b, {"down"})
+        if r["climb"]:
+            assert r["data"] == (seen["L"] if (r["hy"] >> 4) & 1 else seen["R"]), r
+    assert b.v("HY") > hy0
+    b.climb("up")                                        # off the ladder, onto F2: back to walking facing
+    for _ in range(3):
+        r = _hero_probe(b, set())
+    assert r["climb"] == 0 and r["data"] == (seen["L"] if r["facing"] < 0 else seen["R"]), r
+    print("   %d climbing frames, %d hand-over-hand flips, still when still, walking frame restored after the climb" % (trace, flips))
 
 
 @scenario
