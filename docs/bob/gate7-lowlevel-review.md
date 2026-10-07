@@ -56,17 +56,19 @@ PH1_LO = (IWIDTH&$F)<<28 | DWIDTH<<18 | $C000 (PITCH 1, DEPTH 4) | XPOS
 - The VJ F8 screenshot of the first Gate 7 build (XORG 177) showed the castle starting mid-screen with its right half cut off.
 - Gate 6's XPOS_MIN=177 is HDB1, the display-begin pixel clock, not the XPOS origin.
 
-## 5. Memory map (Gate 7)
+## 5. Memory map (Gate 7, with the V6 text band and the V7 environment bands)
 
 | Range | Use |
 |---|---|
 | `$000000` | Bob's startup STOP phrase (kept verbatim) |
-| `$001000–$001293` | game state (a5 base); offsets at the top of `gate7_castle.s` |
-| `$002000–$00211F` | 18 object records × 16 bytes (data.l, x, y, h, w, flags) |
-| `$004000–$00412F` | LIVE list: 18 BITMAPs + STOP (OLP) |
-| `$004800–$00492F` | SHADOW list |
-| `$00F000–$00FEFF` | HUD bitmap 320×6 CRY16, CPU-drawn |
-| `$010000–~$016600` | all art, copied once from ROM `pix_start..pix_end`, packed, phrase-aligned |
+| `$001000–$0013A9` | game state (a5 base); offsets at the top of `gate7_castle.s` |
+| `$002000–$00213F` | 20 object records × 16 bytes (data.l, x, y, h, w, flags) |
+| `$004000–$00414F` | LIVE list: 20 BITMAPs + STOP (OLP) |
+| `$004800–$00494F` | SHADOW list |
+| `$00F000–$00FEFF` | HUD bitmap 160×12 CRY16, CPU-drawn |
+| `$010000–$019540` | all art (38,208 B, `ART_BYTES`), copied once from ROM `pix_start..pix_end`, packed, phrase-aligned |
+| `$01A000–$01D1FF` | `TEXTBUF`: castle-voice text band 320×20 CRY16 (Checkpoint B) |
+| `$020000–$0ACA00` | five environment bands, 320×180 CRY16 (Checkpoint C), `$01C200` B each: F1 `$020000`, F2 `$03C200`, F3 `$058400`, F4 `$074600`, F5 `$090800` |
 | `$1FFFFC` | stack (Bob) |
 
 - No overlaps.
@@ -106,3 +108,21 @@ powershell -File jaguar-toolchain/tools/vj_drive.ps1 -Rom jaguar-toolchain/gate7
 - **State block:** 784 B in `$001000` (was 660). Laid out as an `equ` chain; `P_BASE` (used with 8-bit indexed addressing) stays at 90.
 - **Castle-voice text is state only.** Drawing it (Kimi's `font_data.s` into a CPU buffer, or the HUD buffer) is your Checkpoint B call.
 - Still deferred to your final return: the VC field-bit mask, the NTSC/PAL `CONFIG` byte, and final shadow→LIVE validation.
+
+## Checkpoint C implementation: environment bands (V7)
+
+Bob's approval was followed as written, including the Gate 7 address amendment (not the Gate 6 table at `$010000`).
+
+- **Object:** `O_BAND` = index 0, so it draws first and sits behind everything. Every other index moves up by one. `NOBJ` is 20, STOP is at index 20, and HUD and text remain the last two objects (`O_HUD` 18, `O_TEXT` 19).
+- **Fields:** opaque (no TRANS), 80 phrases × 180 lines, x 0, y halfline 32 (screen row 0). `DATA` is switched per floor from `bandtab` in `set_objects`, so it goes through the normal `set_objects` → `build_list` → `copy_list` refresh every blank.
+- **Residency:** all five bands are copied once at boot from ROM (`bands_start..bands_end`, 576,000 B) by a 32-byte `movem.l` loop, 18,000 passes, before the video is switched on. Nothing is copied or swapped on a floor change, and nothing writes to the bands afterwards.
+- **Guards (Bob's list):**
+  1. Phrase alignment: `BANDS_BASE`, `BAND_SIZE` and every band address are multiples of 8.
+  2. The band is refreshed through the normal list build and copy every blank.
+  3. The band object has no TRANS flag (record, SHADOW and LIVE).
+  4. W = 80 phrases, H = 180.
+  5. Gameplay constants, collision, ladders, floor physics, HUD, `TEXTBUF` and the art slots are unchanged. Gameplay state is identical to the pre-band build `0f6a185` for 1,820 frames of scripted input.
+  6. Scripted tests, campaign, soak, COFF guard and VJ screenshots of all five floors.
+- **Gate 7 note:** the static-LINK guard from Gate 6 does not apply, because `build_list` generates every LINK. The guard here verifies the `O_*` indices (one slot each, 0..19), `NOBJ`, STOP placement and the SHADOW → LIVE copy length (20 headers), and that each LINK points at the next object.
+- **Tests:** `band_guards` (addresses, region collisions, indices, STOP, LINK chain, resident data equals Kimi's files, the band object), `band_floors` (a real five-floor route: pointer and pixels on every floor, bands unmodified afterwards), `band_no_gameplay_effect` (against the `0f6a185` build). The soak checks the band object on every frame and the CRC of the band region at the end.
+- **Boot:** the band copy adds about 8 simulated frames before the video switches on. The test harness now waits for video-on (`JagSim.boot_wait`) rather than a fixed 5 frames.

@@ -46,7 +46,7 @@ class Bot:
         self.s = JagSim(COF)
         self.name = name
         self.shots = 0
-        self.s.run_frames(5)
+        self.s.boot_wait()
 
     # ---- state
     def v(self, k):
@@ -1130,7 +1130,7 @@ def _reference_band(line1, line2, arg, glyphs, table, face, relief):
 def _text_bot(cof):
     tb = Bot.__new__(Bot)
     tb.s, tb.name, tb.shots = JagSim(cof), "text", 0
-    tb.s.run_frames(5)
+    tb.s.boot_wait()
     return tb
 
 
@@ -1280,6 +1280,175 @@ def msg_no_gameplay_effect(b):
                 diff = [i for i in range(hi) if st[0][i] != go[i] and i not in skip]
                 assert not diff, "%s: gameplay state diverged at frame %d (offset %d)" % (tag, frame, diff[0])
     print("   %d frames x3 builds, settled gameplay state identical (%d bytes, %d frames compared)" % (frame, hi, compared))
+
+# ---------------------------------------------------------------- environment bands (Bob Checkpoint C)
+BAND_REF = "0f6a185"                                  # the pre-band baseline the gameplay must still equal
+BANDS_DIR = os.path.join(ROOT, "kimi_sprites", "bands")
+BAND_ADDR = (0x020000, 0x03C200, 0x058400, 0x074600, 0x090800)     # Bob's Checkpoint C table
+BAND_END = 0x0ACA00
+
+
+def band_words(n):
+    """Kimi's vendored img_band_f<n+1>.s as a list of CRY16 words."""
+    import re
+    txt = open(os.path.join(BANDS_DIR, "img_band_f%d.s" % (n + 1)), encoding="utf-8", errors="replace").read()
+    out = []
+    for ln in txt.splitlines():
+        out += [int(w, 16) for w in re.findall(r"\$([0-9A-Fa-f]{4})(?![0-9A-Fa-f])", ln.split(";")[0])]
+    return out
+
+
+def live_band(sim):
+    """(data, ypos, height, iwidth, trans, link, type) of object 0 in LIVE."""
+    import struct
+    p0, p1 = struct.unpack(">QQ", bytes(sim.uc.mem_read(SYM["LIVE"], 16)))
+    return dict(data=((p0 >> 43) & 0x1FFFFF) << 3, y=(p0 >> 3) & 0x7FF, h=(p0 >> 14) & 0x3FF,
+                iw=(p1 >> 28) & 0x3FF, trans=(p1 >> 47) & 1, link=((p0 >> 24) & 0x7FFFF) << 3, typ=p0 & 7)
+
+
+@scenario
+def band_guards(b):
+    """Bob's Checkpoint C guards: addresses, object indices, STOP, list lengths, the band object, resident data."""
+    import re
+    import struct
+    S_ = SYM
+    # 1. phrase alignment and Bob's address table
+    assert S_["BANDS_BASE"] == BAND_ADDR[0] and S_["BANDS_BASE"] % 8 == 0
+    assert S_["BAND_SIZE"] == 0x1C200 and S_["BAND_SIZE"] % 8 == 0 and S_["BAND_SIZE"] == 320 * 180 * 2
+    for n in range(5):
+        assert S_["BANDS_BASE"] + n * S_["BAND_SIZE"] == BAND_ADDR[n] and BAND_ADDR[n] % 8 == 0, n
+    assert S_["BANDS_BASE"] + 5 * S_["BAND_SIZE"] == BAND_END
+    # 2. the region collides with nothing
+    art = open(os.path.join(ROOT, "gate7_castle", "castle_art.inc"), encoding="utf-8").read()
+    art_bytes = int(re.search(r"^ART_BYTES\s+equ\s+(\d+)", art, re.M).group(1))
+    art_end = S_["PIXBASE"] + art_bytes
+    tail = bytes(b.s.uc.mem_read(art_end, S_["TEXTBUF"] - art_end))
+    assert not any(tail), "art was copied past ART_BYTES (undercounted size)"
+    assert any(bytes(b.s.uc.mem_read(art_end - 64, 64))), "last 64 bytes of the art are empty (overcounted size)"
+    assert art_end <= S_["TEXTBUF"], "art runs into the text buffer"
+    assert S_["TEXTBUF"] + 320 * 20 * 2 <= S_["BANDS_BASE"], "text buffer runs into the bands"
+    assert S_["HUDBUF"] + S_["HUD_W"] * S_["HUD_H"] * 2 <= S_["PIXBASE"]
+    assert BAND_END <= 0x1FFFFC - 0x1000, "bands run into the stack"
+    n = S_["NOBJ"]
+    assert S_["OBJS"] + n * 16 <= S_["LIVE"]
+    assert S_["LIVE"] + (n + 1) * 16 <= S_["SHADOW"]
+    assert S_["SHADOW"] + (n + 1) * 16 <= S_["HUDBUF"]
+    # 3. object indices: band first, HUD and text last, one slot each, NOBJ 20
+    names = sorted((v, k) for k, v in S_.items() if k.startswith("O_") and k != "O_" and isinstance(v, int))
+    assert [v for v, _ in names] == list(range(n)), names
+    assert n == 20 and S_["O_BAND"] == 0 and S_["O_HUD"] == n - 2 and S_["O_TEXT"] == n - 1
+    print("   NOBJ %d: %s ... %s | art ends $%X | bands $%X-$%X" % (n, names[0][1], names[-1][1], art_end, BAND_ADDR[0], BAND_END))
+    # 4. resident data == Kimi's files, byte for byte (after boot)
+    for f in range(5):
+        want = struct.pack(">%dH" % (320 * 180), *band_words(f))
+        got = bytes(b.s.uc.mem_read(BAND_ADDR[f], len(want)))
+        assert got == want, "band F%d in DRAM differs from Kimi's file" % (f + 1)
+    # 5. the object: first in the list, opaque, 80 phrases x 180 lines, this floor's data, links onward
+    # 6. refreshed through the normal build/copy: SHADOW holds the same, LIVE is copied from it every blank
+    for _ in range(3):
+        b.frames(1)
+        lb = live_band(b.s)
+        assert lb["typ"] == 0 and lb["data"] == BAND_ADDR[b.v("FLOOR")] and lb["iw"] == 80 and lb["h"] == 180, lb
+        assert lb["trans"] == 0, "band must be opaque"
+        assert lb["link"] == S_["LIVE"] + 16, "band must link to object 1"
+    sh = struct.unpack(">QQ", bytes(b.s.uc.mem_read(S_["SHADOW"], 16)))
+    assert ((sh[0] >> 43) & 0x1FFFFF) << 3 == BAND_ADDR[0] and (sh[1] >> 47) & 1 == 0
+    assert b.s.w(S_["OBJS"] + S_["OB_FL"]) == 0, "band record carries no TRANS flag"
+    for base in (S_["LIVE"], S_["SHADOW"]):                  # STOP at index NOBJ in both lists
+        stop = struct.unpack(">Q", bytes(b.s.uc.mem_read(base + n * 16, 8)))[0]
+        assert stop & 7 == 4, hex(base)
+    for i in range(n):                                       # every LINK points at the next object / STOP
+        p0 = struct.unpack(">Q", bytes(b.s.uc.mem_read(S_["LIVE"] + i * 16, 8)))[0]
+        assert (((p0 >> 24) & 0x7FFFF) << 3) == S_["LIVE"] + (i + 1) * 16, i
+    print("   band object: data $%X, 80 phrases x 180 lines, y %d, no TRANS, LINK chain of %d objects + STOP intact" % (
+        lb["data"], lb["y"], n))
+
+
+@scenario
+def band_floors(b):
+    """A real five-floor route: the band switches with the floor and its pixels show through (rows 40-140, x 24-140 and 170-280: clear of ladders)."""
+    import struct
+    seen = []
+    clear = [x for x in range(24, 140)] + [x for x in range(170, 280)]
+
+    def check(tag):
+        b.s.run_frames(1, draw_last=True)
+        f = b.v("FLOOR")
+        lb = live_band(b.s)
+        assert lb["data"] == BAND_ADDR[f], (tag, f, hex(lb["data"]))
+        words = band_words(f)
+        bad = 0
+        for y in range(40, 141, 4):
+            line = b.s.frame_buf[16 + y]
+            for x in clear:
+                if line[x] != words[y * 320 + x]:
+                    bad += 1
+        assert bad == 0, "%s: %d band pixels differ on F%d" % (tag, bad, f + 1)
+        seen.append(f)
+
+    orig_climb = Bot.climb
+
+    def climb(self, direction="up", limit=400):
+        orig_climb(self, direction, limit)
+        if self.v("GSTATE") == 0 and (not seen or self.v("FLOOR") != seen[-1]):
+            check("after climb")
+    check("start")
+    Bot.climb = climb
+    try:
+        b.run_route("L", "L")
+    finally:
+        Bot.climb = orig_climb
+    assert seen[:5] == [0, 1, 2, 3, 4], seen
+    for f in range(5):                                       # nobody ever wrote to the resident bands
+        want = struct.pack(">%dH" % (320 * 180), *band_words(f))
+        assert bytes(b.s.uc.mem_read(BAND_ADDR[f], len(want))) == want, "band F%d was modified" % (f + 1)
+    print("   floors %s: band pointer + pixels correct on each; all five bands unmodified after the run" % [x + 1 for x in seen])
+
+
+def _baseline_cof():
+    """The pre-band build (BAND_REF) assembled from git into the temp dir."""
+    import subprocess, tempfile
+    tmp = os.path.join(tempfile.gettempdir(), "g7_base_" + BAND_REF)
+    cof = os.path.join(tmp, "base.cof")
+    if not os.path.exists(cof):
+        os.makedirs(tmp, exist_ok=True)
+        tar = subprocess.run(["git", "-C", os.path.dirname(ROOT), "archive", BAND_REF, "jaguar-toolchain/gate7_castle"],
+                             capture_output=True, check=True).stdout
+        import io, tarfile
+        tarfile.open(fileobj=io.BytesIO(tar)).extractall(tmp)
+        src = os.path.join(tmp, "jaguar-toolchain", "gate7_castle")
+        bindir = os.environ.get("JAG_BIN", r"C:/Users/Owner/.bob/playground/jaguar-toolchain/bin")
+        subprocess.run([os.path.join(bindir, "rmac.exe"), "-fb", "-m68000", "-o", "base.o", "gate7_castle.s"], cwd=src, check=True, capture_output=True)
+        subprocess.run([os.path.join(bindir, "rln.exe"), "-a", "802000", "r", "r", "-e", "-o", cof, os.path.join(src, "base.o")], cwd=src, check=True, capture_output=True)
+    return cof
+
+
+@scenario
+def band_no_gameplay_effect(b):
+    """Gameplay is untouched by the bands: same input, same settled gameplay state every frame as the pre-band build."""
+    from soak_gate7 import find_wait_blank
+    old = Bot.__new__(Bot)
+    old.s, old.name, old.shots = JagSim(_baseline_cof()), "old", 0
+    old.s.boot_wait()
+    new = Bot("new")
+    lp = [find_wait_blank(x.s) for x in (old, new)]
+    hi = SYM["MSG_ID"]
+    script = [("right", 25), ("a", 1), (None, 3), ("right", 60), ("up", 160), ("left", 30), ("a", 1), (None, 10),
+              ("left", 60), (None, 200), ("right", 120), ("up", 40), (None, 300), ("left", 90), ("up", 120), (None, 600)]
+    frame = compared = 0
+    for key, cnt in script:
+        for _ in range(cnt):
+            pad = {key} if key else set()
+            st = [_settled_frame(x.s, pad, hi, l) for x, l in zip((old, new), lp)]
+            frame += 1
+            if st[0] is None or st[1] is None:
+                assert st[0] is None and st[1] is None, "frame %d: one build did not finish its logic" % frame
+                continue
+            compared += 1
+            diff = [i for i in range(hi) if st[0][i] != st[1][i]]
+            assert not diff, "gameplay state diverged from %s at frame %d (offset %d)" % (BAND_REF, frame, diff[0])
+    print("   %d frames vs %s, settled gameplay state identical (%d bytes, %d frames compared)" % (frame, BAND_REF, hi, compared))
+
 
 @scenario
 def campaign(b):

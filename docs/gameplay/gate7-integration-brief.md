@@ -111,6 +111,7 @@ swinging blade, the Castle Hound, and castle-voice state.
   - **Traps:** spikes 16/24, eruption, falling masonry, swinging blade.
   - **Props:** doors (closed / open / bricked), portcullis, four lever states, exit arch, arrows.
   - **Ladders:** normal and gold, 16×244 (recovered indexed export, converted to CRY16 by `mkart.py`).
+  - **Environment bands (V7, Bob Checkpoint C):** five opaque 320×180 backdrops, all resident from `$020000`, one OP object (`O_BAND`, index 0, `NOBJ` 20) whose data pointer follows the floor. See `docs/bob/gate7-lowlevel-review.md`.
 - **Still placeholder:**
   - Castle Hound
   - chests and shard

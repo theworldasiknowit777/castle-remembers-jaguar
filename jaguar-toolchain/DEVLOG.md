@@ -1133,3 +1133,41 @@ Her files are read, never edited: `tools/mkmsg.py` and `tools/mkfont.py` generat
   - through-floor, 242 rows (gold on F2, normal on F3)
   - hole stub, 34 rows (F2 left, F3 centre)
   - Evidence is in `gate7_castle/v7_evidence/ladder_*`.
+
+### Gate 7 V7 environment bands (Bob Checkpoint C passed)
+
+Bob approved one opaque 320×180 CRY16 band behind everything, the data pointer switched by floor, all five bands resident, at `BANDS_BASE` `$020000` (not the provisional Gate 6 table).
+
+**What changed in the code** (`gate7_castle.s`):
+- **Memory map:** `BANDS_BASE` `$020000`, `BAND_SIZE` `$01C200` (320 × 180 × 2). The bands are F1 `$020000`, F2 `$03C200`, F3 `$058400`, F4 `$074600`, F5 `$090800`, ending at `$0ACA00`. They stay clear of `PIXBASE` (ends `$019540`), `TEXTBUF`, `HUDBUF`, the object records, both OP lists and the stack.
+- **Object list:** `O_BAND` is object 0, so every other index moves up by one. `NOBJ` is 20, STOP is at index 20, and HUD and text stay the last two objects.
+- **Band object:** 80 phrases × 180 lines at halfline 32 (screen row 0), no TRANS, `DATA` from a five-entry table by `FLOOR`. `set_objects` rewrites it every frame, and `build_list` and `copy_list` carry it as for every other object.
+- **Boot:** a 32-byte `movem.l` loop copies the 576,000 B once, before the video is switched on. Nothing is copied or swapped on a floor change.
+- **`set_objects`:** the ladder loop started at `OBJS` implicitly and now starts at `O_LAD0`. This was the only hard-coded "object 0" in the code.
+
+**Kimi's art:** the five band files are vendored unchanged in `kimi_sprites/bands/`. `mkart.py` checks each (label, 320×180, only `dc.w`) and writes `castle_bands.inc`, which `.include`s them, so the 576,000 B are not duplicated in git. It also emits `ART_BYTES` so the tests know the exact art size.
+
+**Tests:**
+- `band_guards`: addresses (mod 8, Bob's table), no region collisions, one slot per `O_*` index, STOP in both lists, every LINK, band object fields, no TRANS (record, SHADOW, LIVE), resident data equals Kimi's files byte for byte.
+- `band_floors`: a real five-floor route. The band pointer and pixels are correct on each floor, and the bands are unmodified afterwards.
+- `band_no_gameplay_effect`: against a build of `0f6a185`, settled gameplay state is identical on all 1,820 frames of scripted input.
+- Soak: the band object is checked every frame and the band region's CRC at the end.
+- `JagSim.boot_wait()` replaces the fixed 5-frame boot wait (the band copy takes about 8 simulated frames).
+
+**Regression:**
+- Scenarios: 34/34.
+- Campaign: 14/15 escapes, 0 softlocks (run for run as before).
+- Soak: 20,000 frames, no invariant violations. Runs, deaths and final tiers are identical to the pre-band build. The busiest frame went from 466 to 469 of 525 halflines.
+- COFF guard: OK (628,664 B).
+- Real VJ: 59.9–60.1 FPS on all five floors.
+
+**Soak invariant note.** `LIVE` shows the floor as it stood when the previous frame's logic finished (about 80 halflines into the frame). The end-of-frame floor can be one logic step ahead of it, so the soak accepts this frame's or the last frame's band, and rejects anything else.
+
+**Presentation findings** (art/runtime, left as they are; none changes gameplay):
+- **The death and whisper flashes are mostly hidden.** They use the background colour, which only shows in the rows below the band (rows 180–194 and under the floor), about a quarter of the screen. The pulse still reads there but is much weaker than the old full-screen flash.
+- **Message-text contrast is lower.** The pale text face (`$98BD`) sits on stone of similar value. It is legible in VJ, with its dark relief, but it is the weakest read on F1, F3 and the sky-less F4.
+- **F1's carved easter egg ("IBM HACKATHON MMXXVI") sits right under the title.** The second message line overlaps it.
+- **Rows 180–193 show the plain background colour.** This is the dark strip above the floor line; the spec expected it, since the bitmap is 180 rows.
+- **Test builds that start on F3 or F5 show the F1 title.** This is a test-setup artefact; normal play is not affected.
+
+A dark plate drawn behind the message band would fix the first three, and the third would also stop the carving being overlapped. It is a small CPU-side change in `draw_text`, not an architecture change, and is left for a decision.

@@ -258,6 +258,17 @@ class JagSim:
             self.frame += 1
         return self
 
+    def boot_wait(self, extra=5, limit=120):
+        """Run until the game has switched the video on (the boot copies the art and
+        the five 576,000-byte environment bands first), then `extra` more frames."""
+        for _ in range(limit):
+            if self.io_w(0x28):
+                break
+            self.run_frames(1)
+        else:
+            raise RuntimeError("game never switched the video on")
+        return self.run_frames(extra)
+
     def snapshot(self):
         """Whole machine state (for look-ahead bots); restore() rewinds to it."""
         return (self.uc.context_save(), bytes(self.uc.mem_read(0, DRAM_SIZE)), bytes(self.io),

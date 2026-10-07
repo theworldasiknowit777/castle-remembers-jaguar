@@ -96,30 +96,40 @@ HUD_Y           equ     480             ; halflines: Kimi's row band y 224+ (bel
 HUD_PITCH       equ     26              ; one category block: 8x8 icon, three 3x3 pips
 HUD_FLASH_FR    equ     30              ; ~0.5 s ring on a pip that just lit
 PIXBASE         equ     $010000         ; art copied here from ROM
+; ---- environment bands (Bob Checkpoint C): five opaque 320x180 CRY16 backdrops,
+;      all resident, copied once at boot. BANDS_BASE replaces Bob's provisional
+;      Gate 6 table ($010000...): PIXBASE, TEXTBUF ($01A000-$01D1FF), HUDBUF,
+;      the OP lists and the stack ($1FFFFC) all lie outside $020000-$0ACA00.
+BANDS_BASE      equ     $020000
+BAND_SIZE       equ     $01C200         ; 320 x 180 x 2 bytes = 14,400 phrases
+BAND_W          equ     80              ; phrases per line
+BAND_H          equ     180             ; lines
+BAND_Y          equ     32              ; halflines: screen row 0
 
 ; ---- objects (list order = draw order) ---------------------
-O_LAD0          equ     0
-O_LAD1          equ     1
-O_LAD2          equ     2
-O_FLOOR         equ     3
-O_EXIT          equ     4
-O_DOORL         equ     5
-O_DOORR         equ     6
-O_GATE          equ     7
-O_LEVL          equ     8
-O_LEVR          equ     9
-O_SPKA          equ     10
-O_SPKB          equ     11
-O_FLAME         equ     12
-O_EN0           equ     13
-O_EN1           equ     14
-O_ARROW         equ     15
-O_HERO          equ     16
-O_HUD           equ     17
+O_BAND          equ     0               ; the floor's environment band: first = behind everything
+O_LAD0          equ     1
+O_LAD1          equ     2
+O_LAD2          equ     3
+O_FLOOR         equ     4
+O_EXIT          equ     5
+O_DOORL         equ     6
+O_DOORR         equ     7
+O_GATE          equ     8
+O_LEVL          equ     9
+O_LEVR          equ     10
+O_SPKA          equ     11
+O_SPKB          equ     12
+O_FLAME         equ     13
+O_EN0           equ     14
+O_EN1           equ     15
+O_ARROW         equ     16
+O_HERO          equ     17
+O_HUD           equ     18
 ; ---- castle-voice text band (Bob Checkpoint B passed on fed2955: one extra
 ;      OP object + a 12,800-byte CPU text buffer)
-O_TEXT          equ     18
-NOBJ            equ     19              ; STOP sits at index NOBJ
+O_TEXT          equ     19
+NOBJ            equ     20              ; STOP sits at index NOBJ
 TEXTBUF         equ     $01A000         ; 320x20 CRY16, after the art (Bob-approved)
 TEXT_Y          equ     48              ; halflines: Kimi's message band y 8..22
 FONT_ADV        equ     6               ; Kimi V6 contract: advance 6, pitch 10, 5x7 in 6x8
@@ -382,6 +392,14 @@ start:
 .art:   move.l  (a1)+,(a0)+
         dbra    d0,.art
 
+        lea     bands_start,a1          ; all five environment bands, once (resident)
+        lea     BANDS_BASE,a0
+        move.w  #((bands_end-bands_start)/32)-1,d0
+.bnd:   movem.l (a1)+,d1-d7/a2          ; 32 bytes a pass
+        movem.l d1-d7/a2,(a0)
+        lea     32(a0),a0
+        dbra    d0,.bnd
+
         bsr     init_objects
         .if ^^defined SHOWCASE
         ; ---- V7 art showcase TEST build only: seed the castle's memory so the
@@ -554,6 +572,7 @@ init_objects:
         lea     16(a0),a0
         dbra    d0,.qt
         clr.w   OBJS+(O_FLOOR*16)+OB_FL   ; floor slab is opaque (as Gate 6)
+        clr.w   OBJS+(O_BAND*16)+OB_FL    ; so is the environment band (no TRANS)
 
         lea     LIVE+(NOBJ*16),a0
         bsr.s   .stop
@@ -2952,12 +2971,22 @@ set_enemy:
 ; ============================================================
 set_objects:
         lea     OBJS,a4
+        ; ---- environment band: this floor's backdrop ----------
+        lea     O_BAND*16(a4),a1
+        move.w  FLOOR(a5),d0
+        lsl.w   #2,d0
+        lea     bandtab,a2
+        move.l  0(a2,d0.w),OB_DATA(a1)
+        clr.w   OB_X(a1)
+        move.w  #BAND_Y,OB_Y(a1)
+        move.w  #BAND_H,OB_H(a1)
+        move.w  #BAND_W,OB_W(a1)
         ; ---- ladders ------------------------------------------
         lea     LADS(a5),a0
         move.w  FLOOR(a5),d0
         mulu    #12,d0
         add.w   d0,a0
-        move.l  a4,a1
+        lea     O_LAD0*16(a4),a1
         moveq   #2,d7
 .lad:   move.w  (a0)+,OB_X(a1)
         move.w  (a0)+,d0
@@ -3673,6 +3702,9 @@ hudcats:                                        ; tier, tier2 (max taken), lit, 
         dc.w    T_TRAP,0,HUDC_TRAPS_LIT,HUDC_TRAPS_DIM
         dc.w    T_CHEST,0,HUDC_CHESTS_LIT,HUDC_CHESTS_DIM
         .include "hud_icons.inc"        ; Kimi's hud_icons.s via tools/mkfont.py
+bandtab:                                ; resident band address per floor
+        dc.l    BANDS_BASE+(0*BAND_SIZE),BANDS_BASE+(1*BAND_SIZE),BANDS_BASE+(2*BAND_SIZE)
+        dc.l    BANDS_BASE+(3*BAND_SIZE),BANDS_BASE+(4*BAND_SIZE)
 enimg:
         dc.l    PIXBASE+(img_skull-pix_start), PIXBASE+(img_guard-pix_start), PIXBASE+(img_heavy-pix_start)
         dc.l    PIXBASE+(img_watcher-pix_start), PIXBASE+(img_wraith-pix_start)
@@ -3686,6 +3718,7 @@ enimg:
 ; ART (generated by tools/mkart.py)
 ; ============================================================
         .include "castle_art.inc"
+        .include "castle_bands.inc"     ; Kimi's five 320x180 environment bands (tools/mkart.py)
         .data
         .include "font.inc"             ; generated by tools/mkfont.py from Kimi's font_data.s
         .text

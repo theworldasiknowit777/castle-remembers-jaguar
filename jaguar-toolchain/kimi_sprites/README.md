@@ -50,3 +50,9 @@ The runtime draws the top 200 rows (up-ladder), 242 (up + hole) or 34 (hole stub
 - Decals and the 320×180 backdrops: a later wave; backdrops need Bob.
 
 `sentinel_skull.s` (V7 wave 1) is superseded by `img_skull.s` and was removed.
+
+## Environment bands (V7, Bob Checkpoint C)
+
+`bands/img_band_f1.s` … `img_band_f5.s` are Kimi's five opaque 320×180 CRY16 backdrops (57,600 `dc.w` words each, 115,200 B), copied unchanged from `kimi/visual-refinement` (commit `fc12c3b`). `bands/V2_ENVIRONMENT_BAND_SPEC.md` and `bands/v2_bands_preview.png` are her spec and preview.
+
+`tools/mkart.py` validates each file (label, 320×180, nothing but `dc.w`) and writes `gate7_castle/castle_bands.inc`, which only `.include`s them; the 576,000 B are not duplicated in git. The game copies them once to `BANDS_BASE` `$020000`.

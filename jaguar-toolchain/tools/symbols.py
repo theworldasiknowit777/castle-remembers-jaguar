@@ -61,7 +61,7 @@ def load(path=SRC, sym=None):
                 pass                            # forward refs (art labels) are not needed
         if m:
             inc = os.path.join(os.path.dirname(path), m.group(1))
-            if os.path.exists(inc) and not inc.endswith("castle_art.inc"):
+            if os.path.exists(inc) and not inc.endswith(("castle_art.inc", "castle_bands.inc")):
                 load(inc, sym)
             pos = m.end()
     return sym

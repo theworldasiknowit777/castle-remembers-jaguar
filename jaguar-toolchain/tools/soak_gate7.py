@@ -13,6 +13,7 @@ Also measures, per frame, the halfline at which the main loop reaches its
 import os
 import random
 import struct
+import zlib
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -23,8 +24,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COF = os.environ.get("COF") or os.path.join(ROOT, "gate7_castle", "gate7_castle.cof")
 S = 0x1000
 SYM = symbols.load()
-NOBJ = int(os.environ.get("NOBJ", "19"))      # 18 objects + the castle-voice text band
+NOBJ = int(os.environ.get("NOBJ", "20"))      # 17 gameplay objects + environment band + HUD + text band
 LIVE = 0x4000
+BANDS_BASE, BAND_SIZE = SYM["BANDS_BASE"], SYM["BAND_SIZE"]
 
 
 def find_wait_blank(sim):
@@ -44,6 +46,8 @@ def main():
     rnd = random.Random(seed)
     sim = JagSim(COF, instr_per_halfline=ipl)
     lo, hi = find_wait_blank(sim)
+    band_crc = None
+    prev_fl = None
     since_blank = None        # halflines since the last blank started (logic deadline: 525)
 
     done_at = []          # halfline (relative to blank start at 507) when logic finished
@@ -84,7 +88,9 @@ def main():
                 since_blank = 0
         sim.frame += 1
         if not sim.io_w(0x28):
-            continue                                   # still booting
+            continue                                   # still booting (art + bands being copied)
+        if band_crc is None:
+            band_crc = zlib.crc32(bytes(sim.uc.mem_read(BANDS_BASE, 5 * BAND_SIZE)))
         # ---- invariants ------------------------------------------
         hx, hy, fl, climb, gs = (sim.sw(S + SYM["HX"]), sim.sw(S + SYM["HY"]), sim.sw(S + SYM["FLOOR"]), sim.sw(S + SYM["CLIMB"]), sim.sw(S + SYM["GSTATE"]))
         if not (0 <= hx <= 304 and 0 <= hy <= 460 and 0 <= fl <= 4):
@@ -95,6 +101,18 @@ def main():
                 dx, dopen = sim.w(b), sim.w(b + 2)
                 if not dopen and hx + 16 > dx and hx < dx + 8 and hy == 372:
                     problems.append("frame %d: hero inside closed door F%d x=%d door=%d" % (f, fl + 1, hx, dx))
+        # LIVE is copied from SHADOW at blank, and SHADOW is built when the previous frame's
+        # logic finishes (blank + ~80 halflines, i.e. early in this frame). So the whole list
+        # (band, ladders, hero) shows FLOOR as it stood at that moment: this frame's floor or
+        # the last frame's, never a stale or invalid band.
+        band0 = struct.unpack(">QQ", sim.uc.mem_read(LIVE, 16))
+        live_data = ((band0[0] >> 43) & 0x1FFFFF) << 3
+        ok_data = {BANDS_BASE + x * BAND_SIZE for x in (fl, prev_fl) if x is not None}
+        if live_data not in ok_data or (band0[1] >> 47) & 1 or (band0[1] >> 28) & 0x3FF != 80 or ((band0[0] >> 14) & 0x3FF) != 180:
+            problems.append("frame %d: environment band object wrong: data $%X (floor %d / last %s), trans %d, w %d, h %d"
+                            % (f, live_data, fl + 1, "-" if prev_fl is None else prev_fl + 1, (band0[1] >> 47) & 1,
+                               (band0[1] >> 28) & 0x3FF, (band0[0] >> 14) & 0x3FF))
+        prev_fl = fl
         stop = struct.unpack(">Q", sim.uc.mem_read(LIVE + NOBJ * 16, 8))[0]
         if stop & 7 != 4:
             problems.append("frame %d: object list lost its STOP" % f)
@@ -108,6 +126,8 @@ def main():
             break
 
     max_run_frames = max(max_run_frames, frames - run_start)
+    if zlib.crc32(bytes(sim.uc.mem_read(BANDS_BASE, 5 * BAND_SIZE))) != band_crc:
+        problems.append("the resident environment bands were modified during the run")
     done_at.sort()
     n = len(done_at)
     print("soak: %d frames, seed %d, %d instr/halfline" % (n, seed, ipl))
