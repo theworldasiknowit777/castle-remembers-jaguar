@@ -1,16 +1,7 @@
-# tests/ — Behavioral Equivalence Tests
+# Testing status
 
-This directory will contain tests verifying that the Jaguar port's game logic
-matches the authoritative original in `original/`.
+Main contains manual runtime records in AGENTS.md and jaguar-toolchain/DEVLOG.md: Gates 1–5 recorded PASS; Gate 6 remains pending. No full HTML-to-Jaguar behavioral-equivalence suite exists on main.
 
-**Status: not started — awaiting Gate 2+**
+The separate `claude/gameplay-refinement` branch contains Gate 7 scripted playtests, a Unicorn-based partial Jaguar hardware model, soak checks and Virtual Jaguar evidence. See [submission reproduction instructions](../docs/submission/DEMO.md) and [evidence boundaries](../docs/submission/EVIDENCE.md).
 
-## Planned approach
-
-- Extract deterministic game logic from `original/index.html` (level generator,
-  trap placement, adaptive difficulty, save-state model)
-- Port equivalent logic to 68000 assembly
-- Write test harness that feeds identical seed inputs to both and compares outputs
-- Targets: level layout, door/lever positions, trap activation, save-state versioning
-
-## Do not add test files here until Gate 2 is authorized.
+The original goal of full baseline equivalence remains future work. The original HTML is read-only; gameplay-specific model tests do not establish complete parity, timing accuracy or physical-hardware correctness.
