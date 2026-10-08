@@ -467,7 +467,13 @@ main:
         cmp.w   #VC_VDE,d0              ; alternate fields in VJ; Gate 6 compared
         blt.s   .wait_blank             ; it raw and refreshed every 2nd frame)
         bsr     copy_list
-        move.w  BGVAL(a5),BG
+        move.w  BGVAL(a5),d0            ; flash colour, or (0) the floor's wall-base shade:
+        bne.s   .bgw                    ; it fills the strip between the band and the floor slab
+        move.w  FLOOR(a5),d0
+        add.w   d0,d0
+        lea     basetab,a0
+        move.w  0(a0,d0.w),d0
+.bgw:   move.w  d0,BG
         bsr     hero_sync               ; (still in the blank: the OP is not reading)
 
         bsr     game_frame
@@ -3796,6 +3802,8 @@ hudcats:                                        ; tier, tier2 (max taken), lit, 
         dc.w    T_TRAP,0,HUDC_TRAPS_LIT,HUDC_TRAPS_DIM
         dc.w    T_CHEST,0,HUDC_CHESTS_LIT,HUDC_CHESTS_DIM
         .include "hud_icons.inc"        ; Kimi's hud_icons.s via tools/mkfont.py
+basetab:                                ; wall-base shade per floor (the background behind the band/floor gap)
+        dc.w    $982E,$772A,$982E,$6728,$9834
 bandtab:                                ; resident band address per floor
         dc.l    BANDS_BASE+(0*BAND_SIZE),BANDS_BASE+(1*BAND_SIZE),BANDS_BASE+(2*BAND_SIZE)
         dc.l    BANDS_BASE+(3*BAND_SIZE),BANDS_BASE+(4*BAND_SIZE)
