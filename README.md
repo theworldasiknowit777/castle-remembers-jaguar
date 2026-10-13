@@ -1,62 +1,139 @@
-# castle-remembers-jaguar
+# The Castle Remembers — Atari Jaguar Port
 
-**The Castle Remembers** — Atari Jaguar port
+**The Castle Remembers** is an adaptive-action game being migrated from an
+HTML5 prototype to a native Atari Jaguar program written in Motorola 68000
+assembly. The castle observes where the player spends time, then uses that
+memory to alter enemy respawns and difficulty after a collision.
 
----
+This repository is the hackathon project for **Building with IBM Bob**. It
+preserves the original browser game as an immutable baseline and documents the
+new native Jaguar work separately.
 
-## Project History
+> **Current release state — Gate 6 is built and assembled; its runtime
+> verification in Virtual Jaguar is still pending.** The earlier rendering,
+> movement, physics, collision, and adaptive-memory gates were runtime
+> verified. See [Verification status](#verification-status) before treating
+> the Gate 6 binary as a release.
 
-**The Castle Remembers** is an original game by Tony Topil, developed as a separate HTML browser game before the documented IBM Bob porting session.
-It is a single-file HTML5 browser game in which the castle learns the player's habits and adapts
-its layout accordingly — rooms, traps, doors, and levers shift based on observed play style.
+## What is playable
 
-The pre-Bob version (save-state version 3, Sep 29 2026) is preserved verbatim in `original/`.
-That snapshot predates the documented October 4 IBM Bob session and is the authoritative port baseline. Its September 29 archive date falls inside the hackathon period; it is not evidence of pre-September-28 completion.
+The current native build, `jaguar-toolchain/gate6_castle/gate6_castle.cof`,
+implements a three-floor vertical castle:
 
-The **IBM Bob / Atari Jaguar migration** — porting the game to native Motorola 68000 assembly
-for the Jaguar console — constitutes the new hackathon work.
+| Floor | Role | Behaviour |
+|---|---|---|
+| 1 | Choice / observation | Enemy 1 patrols; the game records the side the player favours. |
+| 2 | Quiet escalation | No enemy; a grounded edge transition advances the player. |
+| 3 | Exit / judgment | Enemy 2 patrols; reaching the exit triggers a gold win flash and reset. |
 
----
+On any death, the hero respawns on Floor 1. The game increments a death count,
+uses the remembered left/right bias to choose an enemy spawn side, and increases
+speed up to a fixed cap. This makes the adaptation deterministic and visible in
+a short demo.
 
-## Repository Structure
+## Controls
 
+In Virtual Jaguar's keyboard input mapping:
+
+| Key | Action |
+|---|---|
+| `Z` | Move left |
+| `C` | Move right |
+| `S` | Jump while grounded |
+
+The hero is constrained to the display bounds. Ladder transitions occur by
+touching the specified edge while grounded: Floor 1 right → Floor 2; Floor 2
+left → Floor 3; Floor 3 right → win state.
+
+## Build and run on Windows
+
+The project uses a native Windows Jaguar toolchain: **RMAC 2.5.2**, **RLN
+1.7.7**, and **Virtual Jaguar v2.1.3 R5**. The executables are intentionally
+not committed. Install them first by following
+[jaguar-toolchain/TOOLCHAIN-SETUP.md](jaguar-toolchain/TOOLCHAIN-SETUP.md).
+
+From the repository root:
+
+```powershell
+Set-Location jaguar-toolchain
+
+# Assemble the Motorola 68000 source.
+.\bin\rmac.exe -fb -m68000 -o gate6_castle\gate6_castle.o gate6_castle\gate6_castle.s
+
+# Link the emulator-loadable COFF binary.
+.\bin\rln.exe -a 802000 r r -e -o gate6_castle\gate6_castle.cof gate6_castle\gate6_castle.o
+
+# Start the emulator, then choose Jaguar > Open File and select gate6_castle\gate6_castle.cof.
+Start-Process .\emulator\vjaguar\virtualjaguar.exe
 ```
-original/           Frozen, verbatim pre-Bob Castle Remembers baseline
-                    Do not modify. Authoritative source of truth for the port.
 
-jaguar/             Port planning notes (native gate code is in jaguar-toolchain/)
+The committed `gate6_castle.cof` is provided for emulator testing when the
+toolchain is unavailable locally. The source entry point and load address are
+`$802000`.
 
-jaguar-toolchain/   Reproducible native Windows Jaguar development bootstrap
-                    RMAC 2.5.2 assembler, RLN 1.7.7 linker, Virtual Jaguar v2.1.3 R5
-                    hello.s / hello.abs / hello.cof — Gate 1 proof-of-execution
+## Verification status
 
-docs/bob/           IBM Bob development records, session reports, gate summaries
-docs/jaguar/        Jaguar hardware reference, migration notes, architecture docs
+| Gate | Scope | Status |
+|---|---|---|
+| 0 | Pre-Bob browser baseline preserved | Complete |
+| 1 | Native Windows toolchain and blue-screen proof | Runtime verified |
+| 2 | 16×24 CRY16 hero rendering and controller movement | Runtime verified |
+| 3 | Floor, gravity, walking bounds | Runtime verified |
+| 4 | Jump, enemy, collision, reset | Runtime verified |
+| 5 | Adaptive side-bias tracking and enemy respawn | Runtime verified |
+| 6 | Three floors, transitions, second enemy, win state | **Built; runtime verification pending** |
 
-tests/              Behavioral-equivalence plan; no full parity suite on main
-```
+The statuses above follow `AGENTS.md` and `jaguar-toolchain/DEVLOG.md`. The
+existing `v0.6-gate6` tag is not proof of runtime verification.
 
----
+Gate 7 is on `claude/gameplay-refinement`, inspected at
+`7aaaa30cf5a91bdef198e9fcbeae807353836ad6`; it is not merged into `main`. It
+has recorded Virtual Jaguar evidence and scripted tests, with broader Bob
+low-level audit items still open. Gate 7 evidence does not certify Gate 6.
 
-## Gates
+### Gate 6 manual test checklist
 
-| Gate | Status | Description |
-|------|--------|-------------|
-| Gate 0 | Preserved | Frozen pre-Bob HTML baseline |
-| Gate 1 | Recorded runtime PASS | Native Windows toolchain and blue screen |
-| Gate 2 | Recorded runtime PASS | Hero bitmap, authentic sprite and controller movement |
-| Gate 3 | Recorded runtime PASS | Floor, gravity, walking and clamps |
-| Gate 4 | Recorded runtime PASS | Jump, enemy, collision and reset |
-| Gate 5 | Recorded runtime PASS | Side-bias memory; adapted enemy spawn and speed |
-| Gate 6 | Built; runtime verification pending | Three floors, two enemies, ladder transitions and WIN |
+Run this checklist in Virtual Jaguar before release:
 
-Statuses above follow `AGENTS.md` and `jaguar-toolchain/DEVLOG.md` on main. The existing `v0.6-gate6` tag is not proof of runtime verification.
+1. Confirm the hero appears on Floor 1, stands on the floor, and jumps/lands correctly.
+2. Confirm `Z`/`C` movement and both horizontal bounds.
+3. Confirm Enemy 1 patrols on Floor 1 and collision resets the hero.
+4. Walk right on Floor 1 while grounded to enter enemy-free Floor 2.
+5. Walk left on Floor 2 while grounded to enter Floor 3.
+6. Confirm Enemy 2 patrols on Floor 3 and its collision resets the hero to Floor 1.
+7. Walk right on Floor 3 while grounded; confirm the gold/black win flash and reset.
+8. Die repeatedly after favouring each side; confirm spawn side and speed adapt.
+9. Confirm no visual corruption or black screen and stable 59.9 FPS.
 
-Gate 7 is on `claude/gameplay-refinement`, inspected at `7aaaa30cf5a91bdef198e9fcbeae807353836ad6`; it is not merged into main. It has recorded Virtual Jaguar evidence and scripted tests, with broader Bob low-level audit items still open. Gate 7 evidence does not certify Gate 6.
+Detailed gate design, assembly decisions, and prior runtime evidence are in
+[jaguar-toolchain/DEVLOG.md](jaguar-toolchain/DEVLOG.md) and
+[AGENTS.md](AGENTS.md).
+
+## Project history and scope
+
+**The Castle Remembers** is an original game by Tony Topil, developed as a
+separate HTML browser game before the documented IBM Bob porting session. It is
+a single-file HTML5 browser game in which the castle learns the player's habits
+and adapts its layout accordingly—rooms, traps, doors, and levers shift based
+on observed play style.
+
+The pre-Bob version (save-state version 3, September 29, 2026) is preserved
+verbatim in [`original/`](original/). That snapshot predates the documented
+October 4 IBM Bob session and is the authoritative port baseline. Its September
+29 archive date falls inside the hackathon period; it is not evidence of
+pre-September-28 completion.
+
+The IBM Bob / Atari Jaguar migration—porting the game to native Motorola 68000
+assembly for the Jaguar console—constitutes the new hackathon work. Full
+browser-to-Jaguar behavioural equivalence remains future work; the existing
+`tests/` directory documents that planned harness rather than a completed
+automated test suite.
 
 ## IBM Bob hackathon entry
 
-**Castle Remembers Jaguar is the entry.** The HTML browser game and Python/Pygame game are separate projects. `original/` is a preserved reference snapshot, not a substitute live demo for Jaguar.
+**Castle Remembers Jaguar is the entry.** The HTML browser game and
+Python/Pygame game are separate projects. `original/` is a preserved reference
+snapshot, not a substitute live demo for Jaguar.
 
 - [Project description, track and stack](docs/submission/PROJECT.md)
 - [Dated improvements and Bob attribution](docs/submission/EVIDENCE.md)
@@ -64,48 +141,40 @@ Gate 7 is on `claude/gameplay-refinement`, inspected at `7aaaa30cf5a91bdef198e9f
 - [Testing, recording sequence and live demo requirements](docs/submission/DEMO.md)
 - [Submission checklist](docs/submission/CHECKLIST.md)
 
-The YouTube and live Jaguar URLs remain outstanding. No runtime Bob/LLM service or GPU/DSP acceleration is claimed. This documentation update changes no gameplay or baseline files.
+The YouTube and live Jaguar URLs remain outstanding. No runtime Bob/LLM service
+or GPU/DSP acceleration is claimed. This documentation update changes no
+gameplay or baseline files.
 
----
+## IBM Bob contribution
 
-## Toolchain (Gate 1)
+IBM Bob was used in the development workflow to investigate the unfamiliar
+Jaguar environment, establish the Windows build path, reason through low-level
+Tom/Jerry and Object Processor setup, and document repeatable build and
+verification steps. The audit trail includes:
 
-All tools run natively on Windows 10 x64. No WSL, no cross-compiler.
+- [Gate 1 report](docs/bob/gate-1-report.md): the native toolchain, hardware
+  initialization, binary-format checks, and emulator proof.
+- [Development log](jaguar-toolchain/DEVLOG.md): subsequent rendering, input,
+  physics, collision, adaptive-memory, and three-floor implementation work.
+- [Original baseline notes](original/README.md): provenance showing what
+  existed before the IBM Bob hacking period.
 
-| Tool | Version | Source |
-|------|---------|--------|
-| RMAC assembler | 2.5.2 | rmac.sourceforge.io |
-| RLN linker | 1.7.7 | rmac.sourceforge.io |
-| Virtual Jaguar | v2.1.3 R5 | OldLincoln fork (Qt5) |
+## Repository layout
 
-### Reproducible build
-
-```powershell
-cd jaguar-toolchain
-
-# Assemble
-.\bin\rmac.exe -fb -m68000 -o hello\hello.o hello\hello.s
-
-# Link → ABS  (hardware / flash cart)
-.\bin\rln.exe -a 802000 -e 802000 -o hello\hello.abs hello\hello.o
-
-# Link → COF  (emulator preferred)
-.\bin\rln.exe -a 802000 -e 802000 -c -o hello\hello.cof hello\hello.o
-
-# Launch emulator, then: Jaguar > Open File > hello\hello.cof
-Start-Process .\emulator\vjaguar\virtualjaguar.exe
+```text
+original/            Immutable pre-Bob HTML5 baseline
+jaguar/              Jaguar-port planning notes
+jaguar-toolchain/    68000 source, build outputs, setup guide, and dev log
+  gate6_castle/      Current three-floor COFF build
+docs/bob/            IBM Bob development records
+docs/jaguar/         Hardware and migration notes
+docs/submission/     Submission materials and evidence
+tests/               Planned behavioural-equivalence test area
 ```
 
-**Result:** solid blue screen at 59.9 FPS.  
-Screenshot: `jaguar-toolchain/hello/screenshot.png`
+## License and third-party tools
 
----
-
-## License
-
-`original/` — copyright Tony Topil. All rights reserved.  
-`jaguar/` — copyright Tony Topil. All rights reserved.  
-`jaguar-toolchain/include/jaguar.inc` — copyright 1992–1995 Atari Computer Corporation
-(community-distributed reference header; not for redistribution).  
-Third-party binaries (RMAC, RLN, Virtual Jaguar) are not committed to this repository;
-see `jaguar-toolchain/TOOLCHAIN-SETUP.md` for pinned download instructions.
+`original/` and `jaguar/` are copyright Tony Topil. The Atari header reference
+in `jaguar-toolchain/include/jaguar.inc` is copyright Atari Computer
+ Corporation. RMAC, RLN, and Virtual Jaguar are not redistributed here; see the
+ toolchain setup guide for their sources and installation instructions.
