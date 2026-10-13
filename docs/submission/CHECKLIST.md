@@ -1,6 +1,6 @@
 # Submission checklist — October 18, 2026
 
-Deadline: 11:59 PM Eastern / **10:59 PM America/Chicago**. Aim to submit October 17 and use October 18 for link checks. Official event page inspected October 8. Linked full rules/guide PDFs were not readable through the web tool; read those linked documents and confirm registration eligibility before final submission.
+Deadline: 11:59 PM Eastern / **10:59 PM America/Chicago**. Aim to submit October 17 and use October 18 for link checks. The official rules and guide have been reviewed: the required package includes accessible GitHub code/instructions, a <=100-word description, track and technology list, pitch PDF, an English YouTube demo of <=3 minutes, and a live working URL that judges can test for free. No native-download exemption has been identified. Confirm registration eligibility before final submission.
 
 | Requirement | Current state | Next action |
 |---|---|---|
@@ -10,7 +10,7 @@ Deadline: 11:59 PM Eastern / **10:59 PM America/Chicago**. Aim to submit October
 | Pitch PDF | Created using repository screenshots | Verify final scope and team before upload |
 | Testing and deployment instructions | DEMO.md plus existing toolchain instructions | Capture one fresh normal-build smoke test and final test log |
 | YouTube <=3 min | Storyboard/narration prepared; video not recorded | Owner records/uploads; insert tested watch URL |
-| Live working URL | No verified live Jaguar environment | Resolve hosting or obtain explicit organizer exception |
+| Live working URL | No verified live Jaguar environment; a downloadable COF alone is insufficient | Resolve a browser-accessible Jaguar environment or obtain an explicit organizer exception |
 | All submission items in repo | Documentation/deck branch prepared | Add real URLs and Bob evidence; keep accessible during judging |
 
 ## Priority order

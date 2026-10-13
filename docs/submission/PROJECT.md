@@ -2,7 +2,7 @@
 
 Evidence cutoff: October 8, 2026. Prepared by Codex from repository history; this packaging work is not attributed to IBM Bob.
 
-## Project description (89 words)
+## Project description (<=100 words)
 
 Castle Remembers Jaguar brings an adaptive castle game to native Atari Jaguar assembly. IBM Bob helped establish the Windows build toolchain, implement the rendering and adaptive-memory foundation, and review later display and memory architecture. The separate HTML game supplies the preserved behavioral baseline. Jaguar development adds controller input, collision, enemy adaptation, and a five-floor branch with doors, levers, traps, and castle observations. Repository records distinguish Bob’s work from Claude gameplay and Kimi art contributions. Gates 1–5 have recorded runtime passes; Gate 7 has emulator evidence. Gate 6 remains unverified.
 
