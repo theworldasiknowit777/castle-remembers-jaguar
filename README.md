@@ -83,6 +83,14 @@ toolchain is unavailable locally. The source entry point and load address are
 | 5 | Adaptive side-bias tracking and enemy respawn | Runtime verified |
 | 6 | Three floors, transitions, second enemy, win state | **Built; runtime verification pending** |
 
+The statuses above follow `AGENTS.md` and `jaguar-toolchain/DEVLOG.md`. The
+existing `v0.6-gate6` tag is not proof of runtime verification.
+
+Gate 7 is on `claude/gameplay-refinement`, inspected at
+`7aaaa30cf5a91bdef198e9fcbeae807353836ad6`; it is not merged into `main`. It
+has recorded Virtual Jaguar evidence and scripted tests, with broader Bob
+low-level audit items still open. Gate 7 evidence does not certify Gate 6.
+
 ### Gate 6 manual test checklist
 
 Run this checklist in Virtual Jaguar before release:
@@ -101,12 +109,43 @@ Detailed gate design, assembly decisions, and prior runtime evidence are in
 [jaguar-toolchain/DEVLOG.md](jaguar-toolchain/DEVLOG.md) and
 [AGENTS.md](AGENTS.md).
 
-## IBM Bob contribution
+## Project history and scope
 
-This is an existing-project modernization submission. The original HTML5 game
-predates the hackathon and remains preserved verbatim in
-[`original/`](original/). The hackathon work is the migration to a native,
-resource-constrained Atari Jaguar implementation.
+**The Castle Remembers** is an original game by Tony Topil, developed as a
+separate HTML browser game before the documented IBM Bob porting session. It is
+a single-file HTML5 browser game in which the castle learns the player's habits
+and adapts its layout accordingly—rooms, traps, doors, and levers shift based
+on observed play style.
+
+The pre-Bob version (save-state version 3, September 29, 2026) is preserved
+verbatim in [`original/`](original/). That snapshot predates the documented
+October 4 IBM Bob session and is the authoritative port baseline. Its September
+29 archive date falls inside the hackathon period; it is not evidence of
+pre-September-28 completion.
+
+The IBM Bob / Atari Jaguar migration—porting the game to native Motorola 68000
+assembly for the Jaguar console—constitutes the new hackathon work. Full
+browser-to-Jaguar behavioural equivalence remains future work; the existing
+`tests/` directory documents that planned harness rather than a completed
+automated test suite.
+
+## IBM Bob hackathon entry
+
+**Castle Remembers Jaguar is the entry.** The HTML browser game and
+Python/Pygame game are separate projects. `original/` is a preserved reference
+snapshot, not a substitute live demo for Jaguar.
+
+- [Project description, track and stack](docs/submission/PROJECT.md)
+- [Dated improvements and Bob attribution](docs/submission/EVIDENCE.md)
+- [PDF pitch deck](docs/submission/Castle-Remembers-Jaguar-Pitch.pdf)
+- [Testing, recording sequence and live demo requirements](docs/submission/DEMO.md)
+- [Submission checklist](docs/submission/CHECKLIST.md)
+
+The YouTube and live Jaguar URLs remain outstanding. No runtime Bob/LLM service
+or GPU/DSP acceleration is claimed. This documentation update changes no
+gameplay or baseline files.
+
+## IBM Bob contribution
 
 IBM Bob was used in the development workflow to investigate the unfamiliar
 Jaguar environment, establish the Windows build path, reason through low-level
@@ -115,9 +154,8 @@ verification steps. The audit trail includes:
 
 - [Gate 1 report](docs/bob/gate-1-report.md): the native toolchain, hardware
   initialization, binary-format checks, and emulator proof.
-- [Development log](jaguar-toolchain/DEVLOG.md): subsequent rendering,
-  input, physics, collision, adaptive-memory, and three-floor implementation
-  work.
+- [Development log](jaguar-toolchain/DEVLOG.md): subsequent rendering, input,
+  physics, collision, adaptive-memory, and three-floor implementation work.
 - [Original baseline notes](original/README.md): provenance showing what
   existed before the IBM Bob hacking period.
 
@@ -125,27 +163,18 @@ verification steps. The audit trail includes:
 
 ```text
 original/            Immutable pre-Bob HTML5 baseline
-jaguar/              Jaguar-port source area
+jaguar/              Jaguar-port planning notes
 jaguar-toolchain/    68000 source, build outputs, setup guide, and dev log
   gate6_castle/      Current three-floor COFF build
 docs/bob/            IBM Bob development records
 docs/jaguar/         Hardware and migration notes
+docs/submission/     Submission materials and evidence
 tests/               Planned behavioural-equivalence test area
 ```
-
-## Project history and scope
-
-The original game is an HTML5 browser prototype in which the castle changes
-rooms, traps, doors, and levers in response to play. The current Jaguar port
-focuses first on proving that its central idea—an environment that remembers
-player behaviour—works within the Atari Jaguar's native rendering and input
-model. Full browser-to-Jaguar behavioural equivalence remains future work;
-the existing `tests/` directory documents that planned harness rather than a
-completed automated test suite.
 
 ## License and third-party tools
 
 `original/` and `jaguar/` are copyright Tony Topil. The Atari header reference
 in `jaguar-toolchain/include/jaguar.inc` is copyright Atari Computer
-Corporation. RMAC, RLN, and Virtual Jaguar are not redistributed here; see the
-toolchain setup guide for their sources and installation instructions.
+ Corporation. RMAC, RLN, and Virtual Jaguar are not redistributed here; see the
+ toolchain setup guide for their sources and installation instructions.

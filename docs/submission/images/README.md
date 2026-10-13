@@ -1,0 +1,1 @@
+Images copied unchanged from repository evidence. Gate 1 image: main `7a0818241be3c4036398547520128c5273f04509`. Other images: branch snapshot `7aaaa30cf5a91bdef198e9fcbeae807353836ad6`, originally captured at their respective V7 milestones. These are recorded Virtual Jaguar images, not fresh captures by Codex. Filenames preserve source identity.
