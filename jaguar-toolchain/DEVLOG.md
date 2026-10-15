@@ -1246,3 +1246,6 @@ The owner's correction: a side-view stride or reach is the wrong read for a ladd
 
 ### Wall base (floor/band gap)
 The ~14 px strip between the band bottom (row 196) and the floor slab (row 210) is the background colour. The blank now writes a per-floor wall-base shade (`basetab`) to BG whenever no flash is active; flashes still override. No object, buffer, geometry or gameplay change; the strip also now shows the whisper/death flashes. VJ-checked on all five floors.
+
+### Jump height
+JUMP_VEL -16 -> -20: peak 36 px -> 55 px, airtime 16 -> 20 frames, so a jump clears spikes and enemies with margin. The two "no gameplay effect" guards now build their reference with today's jump so they still test everything else. Full suite 37/37 (see commit), soak clean (max logic finish 456/525).

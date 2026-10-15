@@ -158,7 +158,7 @@ FLOOR_HL        equ     420             ; floor surface (Gate 6 F1)
 GROUND_Y        equ     372             ; hero top when standing (Bob: F1_YPOS)
 HERO_HMAX       equ     304             ; 320-16
 WALK            equ     2               ; Bob: XPOS_SPEED
-JUMP_VEL        equ     -16             ; Gate 6 was -14; -16 clears 24px spikes
+JUMP_VEL        equ     -20             ; Gate 6 was -14, Gate 7 -16; -20 (peak 55 px) clears spikes and enemies with margin
 GRAVITY         equ     2               ; Bob: GRAVITY
 CLIMB_V         equ     4
 FLIP_TOP        equ     16

@@ -8,6 +8,7 @@ would (walk, ACT, climb, jump), and asserts on the game state in DRAM.
     JSIM_OUT=dir python tools/test_gate7.py   # also save frames there
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -1414,11 +1415,17 @@ def band_floors(b):
     print("   floors %s: band pointer + pixels correct on each; all five bands unmodified after the run" % [x + 1 for x in seen])
 
 
+def SYM_JUMP_VEL():
+    """JUMP_VEL as written in the current source."""
+    t = open(os.path.join(ROOT, "gate7_castle", "gate7_castle.s"), encoding="utf-8", errors="replace").read()
+    return int(re.search(r"(?m)^JUMP_VEL\s+equ\s+(-?\d+)", t).group(1))
+
+
 def _baseline_cof(ref=None):
     """The build of git ref `ref` (default: the pre-band BAND_REF) assembled into the temp dir."""
     import subprocess, tempfile
     ref = ref or BAND_REF
-    tmp = os.path.join(tempfile.gettempdir(), "g7_base_" + ref)
+    tmp = os.path.join(tempfile.gettempdir(), "g7_base_%s_j%d" % (ref, SYM_JUMP_VEL()))
     cof = os.path.join(tmp, "base.cof")
     if not os.path.exists(cof):
         os.makedirs(tmp, exist_ok=True)
@@ -1428,6 +1435,12 @@ def _baseline_cof(ref=None):
         import io, tarfile
         tarfile.open(fileobj=io.BytesIO(tar)).extractall(tmp)
         src = os.path.join(tmp, "jaguar-toolchain", "gate7_castle")
+        # these guards are about everything but the jump: give the old build today's jump
+        sp = os.path.join(src, "gate7_castle.s")
+        t = open(sp, "rb").read().decode("utf-8")
+        t, n = re.subn(r"(?m)^JUMP_VEL(\s+equ\s+)-?\d+", "JUMP_VEL\g<1>%d" % SYM_JUMP_VEL(), t)
+        assert n == 1
+        open(sp, "wb").write(t.encode("utf-8"))
         bindir = os.environ.get("JAG_BIN", r"C:/Users/Owner/.bob/playground/jaguar-toolchain/bin")
         subprocess.run([os.path.join(bindir, "rmac.exe"), "-fb", "-m68000", "-o", "base.o", "gate7_castle.s"], cwd=src, check=True, capture_output=True)
         subprocess.run([os.path.join(bindir, "rln.exe"), "-a", "802000", "r", "r", "-e", "-o", cof, os.path.join(src, "base.o")], cwd=src, check=True, capture_output=True)
