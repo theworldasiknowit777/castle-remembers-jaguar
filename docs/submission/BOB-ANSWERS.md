@@ -1,6 +1,6 @@
 # IBM Bob tool-usage answers (for the submission form)
 
-Every claim below is checked against this repository (`jaguar-toolchain/DEVLOG.md`, `AGENTS.md`, `docs/bob/`, `docs/submission/EVIDENCE.md`). Items in [brackets] are the owner's to fill from Bob's own task history.
+Every claim below is checked against this repository (`jaguar-toolchain/DEVLOG.md`, `AGENTS.md`, `docs/bob/`, `docs/submission/EVIDENCE.md`). Figures that come from Bob's own summary say so.
 
 ## 1. What Bob helped with
 
@@ -23,11 +23,11 @@ Bob built the native foundation of the Jaguar port and then acted as the low-lev
 
 ## 2. Bob tools used
 
-As reported in Bob's own session summary (not independently verifiable from the repository): `write_file` (the gate `.s` sources and `DEVLOG.md`), `apply_diff` / `search_and_replace` (per-gate patches), `execute_command` (running `rmac.exe` and `rln.exe`), `read_file`, `grep`, `update_todo_list`, symbol search over the large Gate 7 source, and HTML artifact output. [Owner: delete any tool you do not see in Bob's task history.]
+As reported in Bob's own session summary (not independently verifiable from the repository): `write_file` (the gate `.s` sources and `DEVLOG.md`), `apply_diff` / `search_and_replace` (per-gate patches), `execute_command` (running `rmac.exe` and `rln.exe`), `read_file`, `grep`, `update_todo_list`, symbol search over the large Gate 7 source, and HTML artifact output.
 
 ## 3. Time saved
 
-[Owner's estimate. Bob's own summary estimated 12-15 hours of a roughly 20-hour project; the repository cannot confirm that figure.]
+Bob's own summary estimates about 12-15 hours saved on a project of roughly 20 hours: mainly the Object Processor phrase layout, the joystick row protocol and the TRANS bit, each a multi-hour hunt on hardware with no debugger. This is an estimate, not a measurement.
 
 ## 4. Specific examples
 
