@@ -1438,7 +1438,7 @@ def _baseline_cof(ref=None):
         # these guards are about everything but the jump: give the old build today's jump
         sp = os.path.join(src, "gate7_castle.s")
         t = open(sp, "rb").read().decode("utf-8")
-        t, n = re.subn(r"(?m)^JUMP_VEL(\s+equ\s+)-?\d+", "JUMP_VEL\g<1>%d" % SYM_JUMP_VEL(), t)
+        t, n = re.subn(r"(?m)^JUMP_VEL(\s+equ\s+)-?\d+", r"JUMP_VEL\g<1>%d" % SYM_JUMP_VEL(), t)
         assert n == 1
         open(sp, "wb").write(t.encode("utf-8"))
         bindir = os.environ.get("JAG_BIN", r"C:/Users/Owner/.bob/playground/jaguar-toolchain/bin")

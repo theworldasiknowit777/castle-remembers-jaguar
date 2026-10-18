@@ -55,3 +55,7 @@ sh jaguar-toolchain/tools/build_gate7.sh
 ```
 
 The supplied Python test model is not full Virtual Jaguar emulation. For runtime checking, open the COF in the documented Windows VJ build and follow the actions above. Dependencies are not fully version-locked in the original branch; record tested local versions with the final recording. Never redirect binary Git output through PowerShell 5.1 `>`.
+
+## Recording footage
+
+`jaguar-toolchain/tools/record_demo.py` replays a logged pad route into real Virtual Jaguar (keys Z C S X L) and records the window with ffmpeg (needs `imageio-ffmpeg` or `FFMPEG`). Clips are built from the normal `gate7_castle.cof`; they are not committed.
