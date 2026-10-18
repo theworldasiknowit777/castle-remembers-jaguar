@@ -4,17 +4,30 @@ Every claim below is checked against this repository (`jaguar-toolchain/DEVLOG.m
 
 ## 1. What Bob helped with
 
-Bob built the native foundation of the Jaguar port. It identified RMAC 2.5.2 and RLN 1.7.7 as the working native Windows toolchain (load address `$802000`) and got the first blue screen running in Virtual Jaguar (Gate 1). It then built the Object Processor bitmap rendering, the hero sprite and controller movement (Gate 2), the floor and gravity (Gate 3), the jump, enemy and collision (Gate 4), and the adaptive side-bias memory with `SIDE_BIAS` and `DEATH_COUNT` (Gate 5).
+Bob built the native foundation of the Jaguar port and then acted as the low-level authority for the five-floor Gate 7 build.
 
-For the five-floor Gate 7 build, Bob acted as the low-level authority. It reviewed the castle-voice text object at Checkpoint B (`fed2955`) and the resident environment-band memory map at Checkpoint C. Its address amendment (`BANDS_BASE $020000`) is in the final build. Gate 7 gameplay was implemented with Claude and the art came from Kimi; the repository documents that split.
+**Bob's own work (Gates 1-5, corroborated by `DEVLOG.md` and `AGENTS.md`)**
+- **Toolchain:** identified RMAC 2.5.2 and RLN 1.7.7 as the working native Windows toolchain (`-fb -m68000`, link at `$802000`) and got the first blue screen running in Virtual Jaguar.
+- **Controller input:** diagnosed broken joystick input (a 32-bit read tested bits 22/23) and specified the 16-bit Row 0 select `$817E`, bits 10/11, active-low.
+- **Object Processor:** found that the OP zeroes HEIGHT in phrase 0 every frame and built the blanking-window refresh loop that keeps BITMAP objects visible. Corrected the TRANS flag to phrase bit 47 (`$00008000`), and fixed `LSL.W` versus `LSL.L` upper-word corruption in the Y-position build.
+- **Game logic:** gravity and floor clamp in halflines, the jump, the AABB collision test, and the Gate 5 adaptive side-bias (`SIDE_BIAS`, `DEATH_COUNT`, spawn side and speed on respawn).
+- **Documentation:** `DEVLOG.md` entries and the Gate 1 report.
+
+**Bob as reviewer of Gate 7**
+- Memory-safety, OP-safety and visual-readiness review of Gate 7 (`docs/bob/gate7-visual-integration-review.md`).
+- Low-level review request and findings (`docs/bob/gate7-lowlevel-review.md`).
+- Checkpoint B (`fed2955`): approved the castle-voice text object with no required changes.
+- Checkpoint C: approved the resident environment bands, with the address amendment `BANDS_BASE $020000`, which is in the final build.
+
+**Not Bob's work (declared)**: Gate 7 gameplay was implemented with Claude and its art came from Kimi, and Gate 6 is built but not runtime-verified. The late climb, wall-base and jump changes are Claude's.
 
 ## 2. Bob tools used
 
-[List only the tools that appear in Bob's own task history.]
+As reported in Bob's own session summary (not independently verifiable from the repository): `write_file` (the gate `.s` sources and `DEVLOG.md`), `apply_diff` / `search_and_replace` (per-gate patches), `execute_command` (running `rmac.exe` and `rln.exe`), `read_file`, `grep`, `update_todo_list`, symbol search over the large Gate 7 source, and HTML artifact output. [Owner: delete any tool you do not see in Bob's task history.]
 
 ## 3. Time saved
 
-[Owner's honest estimate, or "not measured".]
+[Owner's estimate. Bob's own summary estimated 12-15 hours of a roughly 20-hour project; the repository cannot confirm that figure.]
 
 ## 4. Specific examples
 
