@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Castle Remembers — Atari Jaguar</title>
+  <style>
+    body{margin:0;background:#14130f;color:#d8d2b8;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:900px;margin:0 auto;padding:16px}
+    h1{font-size:1.4rem;margin:.2em 0}
+    #game{width:100%;max-width:880px;aspect-ratio:4/3;background:#000}
+    code,kbd{background:#2a2820;padding:1px 6px;border-radius:4px}
+    a{color:#e0b84c}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Castle Remembers — native Atari Jaguar (68000 assembly)</h1>
+  <p>This is the real Jaguar program (<code>gate7_castle.cof</code>) running in a Jaguar emulator in your browser. Click the game, then play.</p>
+  <div id="game"></div>
+  <p><b>Controls:</b> <kbd>←</kbd>/<kbd>→</kbd> walk · <kbd>↑</kbd> jump / climb up · <kbd>↓</kbd> climb down / act · <kbd>Z</kbd> act (open door, pull lever, shove guard). Click the game first.<br>
+  Reach the exit on floor 5. The castle remembers how you played and rebuilds itself against you.</p>
+  <p><a href="https://github.com/theworldasiknowit777/castle-remembers-jaguar">Source, build and tests on GitHub</a> ·
+  emulator: <a href="https://emulatorjs.org">EmulatorJS</a> with the Virtual Jaguar core (GPL-3.0).</p>
+</main>
+<script>
+  window.EJS_player = '#game';
+  window.EJS_core = 'jaguar';
+  window.EJS_gameName = 'Castle Remembers';
+  window.EJS_gameUrl = 'game/gate7_castle.cof';
+  window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+  window.EJS_startOnLoaded = true;
+</script>
+<script src="https://cdn.emulatorjs.org/stable/data/loader.js"></script>
+</body>
+</html>

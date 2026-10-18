@@ -2,7 +2,7 @@
 
 ## Recording target: 2 minutes 50 seconds
 
-Use normal Gate 7, pinned to `7aaaa30cf5a91bdef198e9fcbeae807353836ad6`, after a fresh smoke run and remaining audit review. If it fails, use verified Gate 5 and revise the deck/description to that scope. Do not silently replace the candidate with Gate 6. Do not substitute the separate HTML application.
+Use normal Gate 7, pinned to `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf`, after a fresh smoke run and remaining audit review. If it fails, use verified Gate 5 and revise the deck/description to that scope. Do not silently replace the candidate with Gate 6. Do not substitute the separate HTML application.
 
 | Time | Screen / action | Suggested narration |
 |---|---|---|
@@ -46,7 +46,7 @@ For Gate 7 use the exact candidate checkout and its existing tools:
 ```sh
 git clone https://github.com/theworldasiknowit777/castle-remembers-jaguar.git
 cd castle-remembers-jaguar
-git checkout 7aaaa30cf5a91bdef198e9fcbeae807353836ad6
+git checkout 88874d8d1fd28925fae7d2416bd2d7dcf63e79cf
 python -m pip install unicorn pillow
 python jaguar-toolchain/tools/check_cof.py jaguar-toolchain/gate7_castle/gate7_castle.cof
 python jaguar-toolchain/tools/test_gate7.py

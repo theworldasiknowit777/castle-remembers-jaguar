@@ -1,7 +1,7 @@
 # Local EmulatorJS validation wrapper
 
 This unhosted wrapper is for a local browser check of the pinned Gate 7
-candidate `7aaaa30cf5a91bdef198e9fcbeae807353836ad6`. It is not a deployed game,
+candidate `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf`. It is not a deployed game,
 does not supply a judging URL, and does not bundle the candidate binary or any
 emulator core.
 

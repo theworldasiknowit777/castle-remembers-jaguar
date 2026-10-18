@@ -33,7 +33,7 @@ The adaptive rules are game logic. Bob is a development tool; no runtime Bob ser
 ## Release scope
 
 - `main` inspected at `7a0818241be3c4036398547520128c5273f04509`: Gates 1–5 recorded PASS, Gate 6 built/pending.
-- Strongest demo candidate: `claude/gameplay-refinement` at `7aaaa30cf5a91bdef198e9fcbeae807353836ad6`. It has Gate 7 runtime images and development records. It is not merged into main; broad low-level audit items remain open.
+- Strongest demo candidate: `claude/gameplay-refinement` at `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf`. It has Gate 7 runtime images and development records. It is not merged into main; broad low-level audit items remain open.
 - This documentation branch is based on main and does not merge or change gameplay. Pin the candidate SHA in the submission and recording. If the final candidate changes, refresh claims and evidence together.
 
 ## Submission fields still requiring real URLs

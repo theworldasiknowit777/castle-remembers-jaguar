@@ -45,11 +45,11 @@ All commits above fall within September 28–October 18. Commit dates establish 
 
 - [Official event](https://hackathon.stackup.dev/web/events/building-with-ibm-bob)
 - [Main snapshot](https://github.com/theworldasiknowit777/castle-remembers-jaguar/tree/7a0818241be3c4036398547520128c5273f04509)
-- [Gate 7 candidate](https://github.com/theworldasiknowit777/castle-remembers-jaguar/tree/7aaaa30cf5a91bdef198e9fcbeae807353836ad6)
+- [Gate 7 candidate](https://github.com/theworldasiknowit777/castle-remembers-jaguar/tree/88874d8d1fd28925fae7d2416bd2d7dcf63e79cf)
 - [Gate 1 report](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/7a0818241be3c4036398547520128c5273f04509/docs/bob/gate-1-report.md)
-- [Gate 7 devlog](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/7aaaa30cf5a91bdef198e9fcbeae807353836ad6/jaguar-toolchain/DEVLOG.md)
-- [Checkpoint B](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/7aaaa30cf5a91bdef198e9fcbeae807353836ad6/docs/bob/gate7-v6-checkpoint-b.md)
-- [Audit and Checkpoint C](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/7aaaa30cf5a91bdef198e9fcbeae807353836ad6/docs/bob/gate7-lowlevel-review.md)
+- [Gate 7 devlog](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/88874d8d1fd28925fae7d2416bd2d7dcf63e79cf/jaguar-toolchain/DEVLOG.md)
+- [Checkpoint B](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/88874d8d1fd28925fae7d2416bd2d7dcf63e79cf/docs/bob/gate7-v6-checkpoint-b.md)
+- [Audit and Checkpoint C](https://github.com/theworldasiknowit777/castle-remembers-jaguar/blob/88874d8d1fd28925fae7d2416bd2d7dcf63e79cf/docs/bob/gate7-lowlevel-review.md)
 
 ## Asset review
 

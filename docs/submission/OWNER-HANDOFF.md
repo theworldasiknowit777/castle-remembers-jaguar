@@ -2,7 +2,7 @@
 
 ## Pinned candidate
 
-Use Gate 7 commit `7aaaa30cf5a91bdef198e9fcbeae807353836ad6` for the demo unless
+Use Gate 7 commit `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf` for the demo unless
 the owner intentionally selects and verifies another candidate. It is a
 separate branch and is not merged by this submission-documentation work.
 

@@ -9,6 +9,13 @@ This repository is the hackathon project for **Building with IBM Bob**. It
 preserves the original browser game as an immutable baseline and documents the
 new native Jaguar work separately.
 
+## Play it
+
+**Live demo:** https://theworldasiknowit777.github.io/castle-remembers-jaguar/play/ runs the real
+Gate 7 Jaguar binary in a browser Jaguar emulator. Arrow keys move, Up jumps or climbs up,
+Down climbs down or acts, Z acts (open a door, pull a lever, shove a guard).
+The same `.cof` runs in Virtual Jaguar; see `docs/submission/DEMO.md`.
+
 > **Current release state — Gate 6 is built and assembled; its runtime
 > verification in Virtual Jaguar is still pending.** The earlier rendering,
 > movement, physics, collision, and adaptive-memory gates were runtime
@@ -86,9 +93,9 @@ toolchain is unavailable locally. The source entry point and load address are
 The statuses above follow `AGENTS.md` and `jaguar-toolchain/DEVLOG.md`. The
 existing `v0.6-gate6` tag is not proof of runtime verification.
 
-Gate 7 is on `claude/gameplay-refinement`, inspected at
-`7aaaa30cf5a91bdef198e9fcbeae807353836ad6`; it is not merged into `main`. It
-has recorded Virtual Jaguar evidence and scripted tests, with broader Bob
+**Gate 7 (the submitted build)** is `jaguar-toolchain/gate7_castle/gate7_castle.cof`,
+game code frozen at `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf` and merged into
+`main`. It has recorded Virtual Jaguar evidence and scripted tests, with broader Bob
 low-level audit items still open. Gate 7 evidence does not certify Gate 6.
 
 ### Gate 6 manual test checklist
