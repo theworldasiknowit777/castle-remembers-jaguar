@@ -16,41 +16,30 @@ Gate 7 Jaguar binary in a browser Jaguar emulator. Arrow keys move, Up jumps or 
 Down climbs down or acts, Z acts (open a door, pull a lever, shove a guard).
 The same `.cof` runs in Virtual Jaguar; see `docs/submission/DEMO.md`.
 
-> **Current release state — Gate 6 is built and assembled; its runtime
-> verification in Virtual Jaguar is still pending.** The earlier rendering,
-> movement, physics, collision, and adaptive-memory gates were runtime
-> verified. See [Verification status](#verification-status) before treating
-> the Gate 6 binary as a release.
+> **Submitted build: Gate 7** (`jaguar-toolchain/gate7_castle/gate7_castle.cof`), a
+> five-floor castle. Gates 1–5 were runtime verified in Virtual Jaguar. Gate 6
+> (three floors) was built but its runtime verification is still pending; see
+> [Verification status](#verification-status).
 
 ## What is playable
 
-The current native build, `jaguar-toolchain/gate6_castle/gate6_castle.cof`,
-implements a three-floor vertical castle:
+Five floors with doors, levers and gates, chests, a long ladder, six enemy types
+(including the Castle Hound), spikes, eruptions, falling masonry and a blade trap.
+The castle keeps a six-category memory of how you play (where you hide, how you die,
+what you open) and uses it to rebuild itself and adapt enemies each life. A castle-voice
+text band and an icon/pip HUD make that memory visible. Reach the exit on floor 5 to win.
 
-| Floor | Role | Behaviour |
-|---|---|---|
-| 1 | Choice / observation | Enemy 1 patrols; the game records the side the player favours. |
-| 2 | Quiet escalation | No enemy; a grounded edge transition advances the player. |
-| 3 | Exit / judgment | Enemy 2 patrols; reaching the exit triggers a gold win flash and reset. |
-
-On any death, the hero respawns on Floor 1. The game increments a death count,
-uses the remembered left/right bias to choose an enemy spawn side, and increases
-speed up to a fixed cap. This makes the adaptation deterministic and visible in
-a short demo.
+On any death the castle uses what it observed to change enemy spawns, speed and
+hazards. The rules are deterministic, so the same habits produce the same response.
 
 ## Controls
 
-In Virtual Jaguar's keyboard input mapping:
+| Where you play | Walk | Jump / climb up | Climb down | Act (door, lever, shove) |
+|---|---|---|---|---|
+| Browser demo (`/play/`) | Left / Right arrows | Up arrow | Down arrow | Z |
+| Virtual Jaguar keyboard map | Z / C | S | X | L |
 
-| Key | Action |
-|---|---|
-| `Z` | Move left |
-| `C` | Move right |
-| `S` | Jump while grounded |
-
-The hero is constrained to the display bounds. Ladder transitions occur by
-touching the specified edge while grounded: Floor 1 right → Floor 2; Floor 2
-left → Floor 3; Floor 3 right → win state.
+The hero is constrained to the display bounds. Ladders connect the floors.
 
 ## Build and run on Windows
 
@@ -59,24 +48,29 @@ The project uses a native Windows Jaguar toolchain: **RMAC 2.5.2**, **RLN
 not committed. Install them first by following
 [jaguar-toolchain/TOOLCHAIN-SETUP.md](jaguar-toolchain/TOOLCHAIN-SETUP.md).
 
-From the repository root:
+From the repository root, build Gate 7 with the provided script (it runs RMAC, RLN
+and the COF header check):
 
-```powershell
-Set-Location jaguar-toolchain
-
-# Assemble the Motorola 68000 source.
-.\bin\rmac.exe -fb -m68000 -o gate6_castle\gate6_castle.o gate6_castle\gate6_castle.s
-
-# Link the emulator-loadable COFF binary.
-.\bin\rln.exe -a 802000 r r -e -o gate6_castle\gate6_castle.cof gate6_castle\gate6_castle.o
-
-# Start the emulator, then choose Jaguar > Open File and select gate6_castle\gate6_castle.cof.
-Start-Process .\emulator\vjaguar\virtualjaguar.exe
+```sh
+sh jaguar-toolchain/tools/build_gate7.sh
 ```
 
-The committed `gate6_castle.cof` is provided for emulator testing when the
-toolchain is unavailable locally. The source entry point and load address are
-`$802000`.
+Then start the emulator, choose **Jaguar > Open File** and select
+`jaguar-toolchain\gate7_castle\gate7_castle.cof`. The committed `gate7_castle.cof`
+is provided for emulator testing when the toolchain is unavailable. The entry point
+and load address are `$802000`.
+
+### Tests
+
+```sh
+python -m pip install unicorn pillow
+python jaguar-toolchain/tools/check_cof.py jaguar-toolchain/gate7_castle/gate7_castle.cof
+python jaguar-toolchain/tools/test_gate7.py          # scripted playtests on the real 68000 code
+python jaguar-toolchain/tools/soak_gate7.py 1000 1 18  # soak, checks invariants
+```
+
+The Python harness (`jagsim.py`) is a partial hardware model, not full emulation.
+Runtime checks were done in Virtual Jaguar; nothing was tested on physical hardware.
 
 ## Verification status
 
@@ -148,7 +142,7 @@ snapshot, not a substitute live demo for Jaguar.
 - [Testing, recording sequence and live demo requirements](docs/submission/DEMO.md)
 - [Submission checklist](docs/submission/CHECKLIST.md)
 
-The YouTube and live Jaguar URLs remain outstanding. No runtime Bob/LLM service
+No runtime Bob/LLM service
 or GPU/DSP acceleration is claimed. This documentation update changes no
 gameplay or baseline files.
 
@@ -172,9 +166,10 @@ verification steps. The audit trail includes:
 original/            Immutable pre-Bob HTML5 baseline
 jaguar/              Jaguar-port planning notes
 jaguar-toolchain/    68000 source, build outputs, setup guide, and dev log
-  gate6_castle/      Current three-floor COFF build
+  gate7_castle/      Submitted five-floor build (gate6_castle/ is the earlier three-floor build)
 docs/bob/            IBM Bob development records
 docs/jaguar/         Hardware and migration notes
+docs/play/           Browser demo page (EmulatorJS + Virtual Jaguar core) and the COF
 docs/submission/     Submission materials and evidence
 tests/               Planned behavioural-equivalence test area
 ```

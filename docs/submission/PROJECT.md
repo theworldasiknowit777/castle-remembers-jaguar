@@ -36,11 +36,21 @@ The adaptive rules are game logic. Bob is a development tool; no runtime Bob ser
 - Strongest demo candidate: `claude/gameplay-refinement` at `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf`. It has Gate 7 runtime images and development records. It is not merged into main; broad low-level audit items remain open.
 - This documentation branch is based on main and does not merge or change gameplay. Pin the candidate SHA in the submission and recording. If the final candidate changes, refresh claims and evidence together.
 
-## Submission fields still requiring real URLs
+## Improvements made during the hacking period (Sept 28 – Oct 18)
 
-- YouTube demo URL: **not yet supplied or verified**.
-- Live Jaguar demo URL: **not yet supplied or verified**.
+The preserved HTML game (Sept 29 snapshot) is the pre-Bob baseline and is not claimed as new work. New during the hackathon: the entire native Atari Jaguar implementation in 68000 assembly.
+
+- Oct 4: Windows RMAC/RLN/Virtual Jaguar toolchain and first native frame (IBM Bob).
+- Oct 5: hero sprite, controller movement, floor, jump, collision and adaptive enemy respawn, Gates 2–5 (IBM Bob).
+- Oct 5–7: Gate 7 five-floor castle with doors, levers, gates, chests, ladders, six enemy types, traps and a six-category castle memory (Claude); castle-voice text and HUD, with Bob Checkpoint B review; five resident environment bands and Bob Checkpoint C review (Kimi art).
+- Oct 7: hero facing, walk and climb frames, ladder art, wall-base presentation.
+- Oct 13–18: fresh smoke tests, merge of Gate 7 into `main`, browser demo page (`docs/play/`), pitch deck and submission documentation.
+
+## Submission fields
+
 - Repository: https://github.com/theworldasiknowit777/castle-remembers-jaguar
 - Pitch: `docs/submission/Castle-Remembers-Jaguar-Pitch.pdf`.
+- Live demo URL: https://theworldasiknowit777.github.io/castle-remembers-jaguar/play/ (requires GitHub Pages: `main`, `/docs`; verify signed out before submitting).
+- YouTube demo URL: supplied in the submission form once uploaded and verified.
 
-A browser link to the HTML game does not demonstrate this Jaguar entry. A GitHub source page, screenshot gallery, downloadable COF, or YouTube video alone is not a live working environment.
+The separate HTML game, a screenshot gallery or a downloadable COF alone is not a live working environment; the `/play/` page runs the real COF in a browser emulator.
