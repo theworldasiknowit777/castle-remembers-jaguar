@@ -32,9 +32,9 @@ The adaptive rules are game logic. Bob is a development tool; no runtime Bob ser
 
 ## Release scope
 
-- `main` inspected at `7a0818241be3c4036398547520128c5273f04509`: Gates 1–5 recorded PASS, Gate 6 built/pending.
-- Strongest demo candidate: `claude/gameplay-refinement` at `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf`. It has Gate 7 runtime images and development records. It is not merged into main; broad low-level audit items remain open.
-- This documentation branch is based on main and does not merge or change gameplay. Pin the candidate SHA in the submission and recording. If the final candidate changes, refresh claims and evidence together.
+- Gates 1–5 have recorded runtime passes; Gate 6 was built but remains runtime-unverified.
+- The Gate 7 gameplay candidate at `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf` has recorded Virtual Jaguar evidence and scripted tests. It was merged into `main` in `499d7fbe5487dda40ac8a24f2e8fa5412dbbc4f1`; broad low-level and physical-hardware review items remain open.
+- The owner reports that the entry was submitted. The completed event form is not recorded in this repository.
 
 ## Improvements made during the hacking period (Sept 28 – Oct 18)
 
@@ -50,7 +50,7 @@ The preserved HTML game (Sept 29 snapshot) is the pre-Bob baseline and is not cl
 
 - Repository: https://github.com/theworldasiknowit777/castle-remembers-jaguar
 - Pitch: `docs/submission/Castle-Remembers-Jaguar-Pitch.pdf`.
-- Live demo URL: https://theworldasiknowit777.github.io/castle-remembers-jaguar/play/ (requires GitHub Pages: `main`, `/docs`; verify signed out before submitting).
-- YouTube demo URL: supplied in the submission form once uploaded and verified.
+- Browser demo URL: https://theworldasiknowit777.github.io/castle-remembers-jaguar/play/ (the page is configured for GitHub Pages; this documentation update did not independently verify public playback).
+- YouTube demo URL: not recorded in this repository; the owner reports the entry was submitted.
 
 The separate HTML game, a screenshot gallery or a downloadable COF alone is not a live working environment; the `/play/` page runs the real COF in a browser emulator.

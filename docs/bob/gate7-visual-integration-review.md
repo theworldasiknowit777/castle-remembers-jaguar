@@ -1,7 +1,7 @@
 # Gate 7 — Low-Level Integration Review & Visual Readiness Brief
 
 **Reviewed by:** Bob  
-**Date:** 2025  
+**Date in original record:** 2025 (the year conflicts with the repository's 2026 Gate 7 history; the exact review date has not been independently verified)  
 **Branches audited:** `claude/gameplay-refinement @ f4a42ed`, `kimi/visual-refinement`  
 **Scope:** Memory safety, OP safety, integration gates only. No gameplay redesign. No art direction.
 

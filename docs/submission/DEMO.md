@@ -1,5 +1,9 @@
 # Demo recording and live environment
 
+> The owner reports that the entry was submitted. The recording plan below is
+> retained as historical preparation; it does not establish the final video URL
+> or independently verify public playback of the browser demo.
+
 ## Recording target: 2 minutes 50 seconds
 
 Use normal Gate 7, pinned to `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf`, after a fresh smoke run and remaining audit review. If it fails, use verified Gate 5 and revise the deck/description to that scope. Do not silently replace the candidate with Gate 6. Do not substitute the separate HTML application.
@@ -25,17 +29,19 @@ Controls documented for Gate 7: Z/C move; S jump/climb up; X climb down/ACT; L A
 3. Check playback, readable source/test clips, sound and total duration in a signed-out browser.
 4. Put the actual watch URL in PROJECT.md and the official form. Keep a source recording locally; optionally store a transcript in the repository. No video URL is currently verified.
 
-## Live Jaguar demo: unresolved submission dependency
+## Live Jaguar demo: historical planning and verification
+
+A browser demo is now listed at <https://theworldasiknowit777.github.io/castle-remembers-jaguar/play/>. The owner reports the entry was submitted; public playback was not independently verified in this documentation update. The alternatives below describe the earlier planning state, not the present submission status.
 
 The official requirement is a URL to a live working environment. A COF download or the separate HTML game is insufficient as evidence of an interactive Jaguar environment.
 
 Preferred paths, in order of practical feasibility:
 
-1. Use an existing browser-accessible Jaguar emulator **only if** it demonstrably loads this exact normal COF, exposes controls, and can lawfully redistribute its required components. Test cold boot, door, ladder, death/rebuild and reset on a second device. No compatible hosted runtime has been established by this audit.
+1. Use an existing browser-accessible Jaguar emulator **only if** it demonstrably loads this exact normal COF, exposes controls, and can lawfully redistribute its required components. Test cold boot, door, ladder, death/rebuild and reset on a second device. At the time of the original planning audit, no compatible hosted runtime had been established.
 2. Host a dedicated, isolated Virtual Jaguar desktop accessible through a browser remote-display session. Judges need scoped game controls and reset, no development account credentials, no access to the owner’s personal desktop, and availability throughout judging. Confirm this URL format with organizers before relying on it.
 3. If neither is feasible, request an explicit organizer exception for a native-console entry: downloadable COF plus prerecorded emulator demo and reproduction instructions. An exception must actually be granted; a download landing page alone does not satisfy the literal rule.
 
-The owner must select/provide the hosting account or existing compatible environment, confirm organizer acceptance where needed, and supply the resulting URL. This submission task does not authorize buying hosting or exposing a personal desktop. Deadline priority: settle this before polishing more gameplay.
+This historical planning did not authorize buying hosting or exposing a personal desktop. Verify the listed browser demo's public playback separately from this planning record.
 
 ## Local reproduction (not a submitted live URL)
 

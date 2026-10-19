@@ -1,33 +1,22 @@
-# Submission checklist — October 18, 2026
+# Submission record — October 18, 2026
 
-Deadline: 11:59 PM Eastern / **10:59 PM America/Chicago**. Aim to submit October 17 and use October 18 for link checks. The official rules and guide have been reviewed: the required package includes accessible GitHub code/instructions, a <=100-word description, track and technology list, pitch PDF, an English YouTube demo of <=3 minutes, and a live working URL that judges can test for free. No native-download exemption has been identified. Confirm registration eligibility before final submission.
+The owner reports that the IBM Bob hackathon entry was submitted. This repository
+records the supporting materials; the submitted form and its receipt are not
+available here for independent verification.
 
-| Requirement | Current state | Next action |
-|---|---|---|
-| GitHub application and README | Code exists; documentation reconciled on submission branch | Review/merge docs PR; select candidate SHA/branch explicitly |
-| <=100-word description, track, stack | Prepared in PROJECT.md | Paste fields; confirm human team and registered category |
-| Improvements in Sept 28–Oct 18 | Commit/evidence ledger prepared | Add original Bob task/review captures |
-| Pitch PDF | Created using repository screenshots | Verify final scope and team before upload |
-| Testing and deployment instructions | DEMO.md plus existing toolchain instructions | Capture one fresh normal-build smoke test and final test log |
-| YouTube <=3 min | Storyboard/narration prepared; video not recorded | Owner records/uploads; insert tested watch URL |
-| Live working URL | No verified live Jaguar environment; a downloadable COF alone is insufficient | Resolve a browser-accessible Jaguar environment or obtain an explicit organizer exception |
-| All submission items in repo | Documentation/deck branch prepared | Add real URLs and Bob evidence; keep accessible during judging |
+| Item | Repository record |
+|---|---|
+| GitHub repository and README | Public `main` contains Gate 7, its README, and testing instructions. |
+| Project description, track, stack and improvements | Documented in [PROJECT.md](PROJECT.md); the completed event form is not in this repository. |
+| Pitch deck | [Castle-Remembers-Jaguar-Pitch.pdf](Castle-Remembers-Jaguar-Pitch.pdf) is on `main`. |
+| Gate 7 build | Candidate gameplay commit `88874d8d1fd28925fae7d2416bd2d7dcf63e79cf` was merged into `main`; recorded emulator evidence and scripted tests are documented separately. |
+| Live demo | [Browser demo](https://theworldasiknowit777.github.io/castle-remembers-jaguar/play/) is listed for the entry. Public availability and playability were not independently verified in this documentation update. |
+| YouTube demo | The owner reports the entry was submitted; the video URL and its playback/duration are not recorded or independently verified in this repository. |
+| Bob contribution | [BOB-ANSWERS.md](BOB-ANSWERS.md) and [EVIDENCE.md](EVIDENCE.md) describe Bob's work and its evidence limits. |
 
-## Priority order
+The separate HTML game is a preserved reference, not the Jaguar demo. The test
+model is not full emulation, and no physical Jaguar verification is claimed.
+Gate 6 is a separate earlier milestone and remains runtime-unverified.
 
-1. Oct 8–10: resolve live Jaguar delivery; collect Bob evidence; close/reconcile the Gate 7 low-level audit with Bob. Gate 6 verification remains a separate task.
-2. Oct 11–13: freeze a demo SHA, complete a cold-start build/runtime check and capture normal gameplay.
-3. Oct 14–16: export <=3-minute video, upload YouTube, verify live URL from a second device; refresh deck only for demonstrated changes.
-4. Oct 17: submit all fields and confirm receipt.
-5. Oct 18: verify links and judging access before 10:59 PM Chicago time.
-
-## Claim guardrails
-
-- Jaguar is the entry. HTML and Python/Pygame are distinct projects.
-- No changes to original/, native gameplay, or existing gate status are made by this packaging work.
-- Do not call all work Bob-generated, call the test model full emulation, or claim physical hardware validation.
-- Preserve milestone-specific evidence; do not turn historical test counts into fresh final-build results.
-- A Gate 6 tag already exists despite pending status; it is not a pass certificate.
-- Current pitch is accurate as an evidence snapshot, but the complete entry is not submission-ready until the video, live environment and final scope are settled.
-
-Official source: https://hackathon.stackup.dev/web/events/building-with-ibm-bob
+The event's listed deadline was October 18, 2026, 11:59 PM Eastern
+(10:59 PM America/Chicago). See the [official event page](https://hackathon.angelhack.com/web/events/building-with-ibm-bob).
